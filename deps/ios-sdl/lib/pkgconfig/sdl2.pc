@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: sdl2
+Description: Simple DirectMedia Layer is a cross-platform multimedia library
+Version: 2.32.4
+Libs: -L${libdir} -lSDL2 -lpthread -lm
+Cflags: -I${includedir}/SDL2 -D_REENTRANT

@@ -1,0 +1,14 @@
+prefix=/workspaces/ikemen-go-ios/deps/ios-ffmpeg
+exec_prefix=${prefix}
+libdir=/workspaces/ikemen-go-ios/deps/ios-ffmpeg/lib
+includedir=/workspaces/ikemen-go-ios/deps/ios-ffmpeg/include
+
+Name: libswscale
+Description: FFmpeg image rescaling library
+Version: 7.5.100
+Requires: libavutil >= 58.29.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lswscale -lm
+Libs.private: 
+Cflags: -I${includedir}
