@@ -2,13 +2,13 @@
 
 An iOS port of [Ikemen GO](https://github.com/ikemen-engine/Ikemen-GO), an open-source fighting game engine compatible with [M.U.G.E.N](https://en.wikipedia.org/wiki/Mugen_(game_engine)) resources, written in Go.
 
-Play classic M.U.G.E.N characters, stages, and screenpacks on your jailbroken iOS device with native on-screen touch controls.
+Play classic M.U.G.E.N characters, stages, and screenpacks on your iOS device with native on-screen touch controls.
 
 ## Features
 
 - **Full M.U.G.E.N compatibility** -- run characters, stages, screenpacks, and fonts from the M.U.G.E.N ecosystem
 - **Native on-screen controls** -- virtual D-pad (8-way) and 6 attack buttons (A/B/C/X/Y/Z) plus Start and Menu
-- **Multiple rendering backends** -- OpenGL ES 3.2 (iOS default), Vulkan, and OpenGL 3.3
+- **OpenGL ES 3.0 rendering** -- hardware-accelerated OpenGL ES 3.0 on iOS
 - **SDL2-based** -- cross-platform windowing, input, and audio via SDL2
 - **FFmpeg integration** -- background video playback (WebM/Matroska with VP8/VP9/Opus/Vorbis)
 - **Module music support** -- MOD/XM/S3M/IT and other tracker formats via libxmp
@@ -17,9 +17,9 @@ Play classic M.U.G.E.N characters, stages, and screenpacks on your jailbroken iO
 
 ## Prerequisites
 
-- **Jailbroken iOS device** (arm64, iOS 15+)
-- **[Theos](https://theos.dev/)** -- iOS build system
-- **Xcode** with command-line tools (provides `clang` and iOS SDK)
+- **iOS device** (arm64, iOS 15+) -- the app is designed to be sideloaded
+- **[Theos](https://theos.dev/)** -- iOS build system (for non-Mac environments)
+- **Clang 21+** -- required for modern iOS SDK compatibility
 - **Go 1.20+** -- for compiling the engine
 
 ### Installing Theos
@@ -50,12 +50,13 @@ The engine must be compiled as a static library for iOS (arm64):
 ```bash
 cd ios/engine
 
-# Set up iOS cross-compilation (adjust SDK path as needed)
+# Set up iOS cross-compilation
 export GOOS=ios
 export GOARCH=arm64
 export CGO_ENABLED=1
-export CC=$(xcrun --sdk iphoneos --find clang)
-export CFLAGS="-arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=15.0"
+export CC=$(which clang)
+export SDKPATH=$(ls -d $THEOS/sdks/iPhoneOS*.sdk | tail -1)
+export CFLAGS="-arch arm64 -isysroot $SDKPATH -miphoneos-version-min=15.0"
 
 # Build the static library
 go build -buildmode=c-archive -o ../../IKEMENGo/engine/libengine.a
@@ -74,7 +75,7 @@ This produces an `.ipa` file in `IKEMENGo/packages/`.
 
 ### 4. Install on device
 
-Transfer the `.ipa` to your device and install it using your preferred package manager (e.g., Sileo, Cydia, or `dpkg -i`).
+Transfer the `.ipa` to your device and install it using your preferred method (e.g., AltStore, Sideloadly, or `dpkg -i` on jailbroken devices).
 
 ## Adding Game Content
 
@@ -139,7 +140,7 @@ ikemen-go-ios/
 
 - **[Ikemen GO](https://github.com/ikemen-engine/Ikemen-GO)** -- the upstream engine this project is based on
 - **[M.U.G.E.N](https://mugenengine.com/)** -- the original fighting game engine by Elecbyte
-- **[Theos](https://theos.dev/)** -- iOS build system for jailbreak development
+- **[Theos](https://theos.dev/)** -- iOS build system for non-Mac environments
 - **[SDL2](https://www.libsdl.org/)** -- cross-platform multimedia library
 - **[FFmpeg](https://ffmpeg.org/)** -- audio/video processing library
 - **[libxmp](https://xmp.sourceforge.net/)** -- module music player library
