@@ -807,21 +807,8 @@ func (r *Renderer_GLES32) Init() {
 	gl.BindVertexArray(r.postVAO)
 	gl.BindBuffer(gl.ARRAY_BUFFER, r.postVertBuffer)
 
-	// External Shaders
-	for i := 0; i < len(sys.cfg.Video.ExternalShaders); i++ {
-		r.postShaderSelect[i], _ = r.newShaderProgram(string(sys.externalShaders[0][i])+"\x00", string(sys.externalShaders[1][i])+"\x00",
-			"", fmt.Sprintf("Postprocess Shader #%v", i), true)
-		r.postShaderSelect[i].RegisterAttributes("VertCoord") // "TexCoord" was registered but never used
-		r.postShaderSelect[i].RegisterUniforms("Texture_GLES32", "TextureSize", "CurrentTime")
-
-		// Configure postVAO for this specific shader's attribute location
-		if loc, ok := r.postShaderSelect[i].attributes["VertCoord"]; ok && loc >= 0 {
-			gl.EnableVertexAttribArray(uint32(loc))
-			gl.VertexAttribPointer(uint32(loc), 2, gl.FLOAT, false, 0, nil)
-		}
-	}
-
-	// Identity shader (no post-processing). This should be the last one in modern OpenGL
+	// Identity shader (no post-processing). Build it first so it can double as
+	// a safe fallback below, and always keep it as the last pass in the chain.
 	identShader, _ := r.newShaderProgram(identVertShader, identFragShader, "", "Identity Postprocess", true)
 	identShader.RegisterAttributes("VertCoord")
 	//identShader.RegisterUniforms("Texture_GLES32", "TextureSize", "CurrentTime") // None of these are used
@@ -832,7 +819,30 @@ func (r *Renderer_GLES32) Init() {
 		gl.VertexAttribPointer(uint32(loc), 2, gl.FLOAT, false, 0, nil)
 	}
 
-	// It should be the last one in modern OpenGL
+	// External Shaders
+	for i := 0; i < len(sys.cfg.Video.ExternalShaders); i++ {
+		prog, perr := r.newShaderProgram(string(sys.externalShaders[0][i])+"\x00", string(sys.externalShaders[1][i])+"\x00",
+			"", fmt.Sprintf("Postprocess Shader #%v", i), true)
+		// External shaders are often written for desktop GL 3.3 (GLSL 330) and
+		// can fail to compile on OpenGL ES 3.0. Never leave a nil program in
+		// the chain or EndFrame will panic; fall back to the identity shader.
+		if perr != nil || prog == nil {
+			Logcat(fmt.Sprintf("GLES: External shader #%v failed to compile, using identity pass instead: %v", i, perr))
+			prog = identShader
+		} else {
+			prog.RegisterAttributes("VertCoord") // "TexCoord" was registered but never used
+			prog.RegisterUniforms("Texture_GLES32", "TextureSize", "CurrentTime")
+
+			// Configure postVAO for this specific shader's attribute location
+			if loc, ok := prog.attributes["VertCoord"]; ok && loc >= 0 {
+				gl.EnableVertexAttribArray(uint32(loc))
+				gl.VertexAttribPointer(uint32(loc), 2, gl.FLOAT, false, 0, nil)
+			}
+		}
+		r.postShaderSelect[i] = prog
+	}
+
+	// Always keep the identity pass as the last one in modern OpenGL
 	r.postShaderSelect[len(r.postShaderSelect)-1] = identShader
 
 	// Unbind for safety

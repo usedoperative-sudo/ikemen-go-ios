@@ -801,6 +801,7 @@ func (s *System) eventUpdate() bool {
 	for _, v := range s.shortcutScripts {
 		v.Activate = false
 	}
+	iosHeartbeat() // iOS: memory/loop heartbeat, survives SIGKILL
 	s.window.pollEvents()
 	s.gameEnd = s.window.shouldClose()
 	return !s.gameEnd

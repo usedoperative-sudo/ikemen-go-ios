@@ -110,6 +110,16 @@ Documents/ikemen-go/IkemenGo/
 1. Place `.def` stage files in `Documents/ikemen-go/IkemenGo/stages/`
 2. Reference them in your screenpack's select definition
 
+> **Note for adding characters**: the iOS build uses the engine's default behavior of keeping every character on a team fully loaded in memory for the whole match. In Tag/Simul/Turns modes with **heavy external fighters**, the combined sprite + sound data can push the app over iOS's memory limit (the **Jetsam** watchdog kills the process with no warning). If the app quits suddenly during a match, it is almost always this. 
+
+## Known Limitations
+
+- **Memory / Jetsam kills with heavy content.** iOS enforces a hard memory limit per app. This port does not perform on-demand asset unloading for standby team fighters (a change that was prototyped but reverted because it could interfere with the engine's internal fight-logic invariants). Consequences:
+  - **Team modes (Tag / Simul / Turns) with large external fighters** can consume a lot of memory, because all team members remain resident.
+  - On low-memory devices, the app may be terminated by iOS with no error dialog.
+  - **Recommendation: avoid playing with very heavy fighters/packs** (particularly multiple big fighters on one team, or stages with long background videos), and keep the number of simultaneously-loaded team members low. A more capable device and fewer/lighter characters will help.
+- **No graceful out-of-memory recovery** in the engine itself.
+
 ## Project Structure
 
 ```
