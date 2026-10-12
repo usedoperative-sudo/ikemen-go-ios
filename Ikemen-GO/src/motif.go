@@ -358,14 +358,14 @@ type InfoBoxProperties struct {
 type CellOverrideProperties struct {
 	Offset      [2]float32 `ini:"offset"`
 	Spacing     [2]float32 `ini:"spacing"`
-	Facing      int32      `ini:"facing" default:"1"`
+	Facing      int32      `ini:"facing"`
 	Skip        bool       `ini:"skip"`
 	Scale       [2]float32 `ini:"scale"`
 	XShear      float32    `ini:"xshear"`
 	Angle       float32    `ini:"angle"`
 	XAngle      float32    `ini:"xangle"`
 	YAngle      float32    `ini:"yangle"`
-	Projection  string     `ini:"projection" default:"orthographic"`
+	Projection  string     `ini:"projection"`
 	FocalLength float32    `ini:"focallength"`
 }
 
@@ -478,6 +478,9 @@ type PlayerSelectProperties struct {
 			Key []string `ini:"key"`
 			Snd [2]int32 `ini:"snd" default:"-1,0"`
 		} `ini:"done"`
+		Cancel struct {
+			Key []string `ini:"key"`
+		} `ini:"cancel"`
 		Next struct {
 			Key []string `ini:"key"`
 		} `ini:"next"`
@@ -762,6 +765,7 @@ type SelectInfoProperties struct {
 	} `ini:"teammenu"`
 	Timer         TimerProperties `ini:"timer"`
 	PaletteSelect int32           `ini:"paletteselect"`
+	CoopQueue     bool            `ini:"coopqueue" default:"false"`
 }
 
 type VsScreenProperties struct {
@@ -1283,8 +1287,11 @@ type HiscoreInfoProperties struct {
 }
 
 type WarningInfoProperties struct {
-	Title   TextProperties    `ini:"title"`
-	Text    TextMapProperties `ini:"text"`
+	Title TextProperties `ini:"title"`
+	Text  struct {
+		TextMapProperties
+		TextWrap string `ini:"textwrap" default:"w"`
+	} `ini:"text"`
 	Overlay OverlayProperties `ini:"overlay"`
 	Cancel  struct {
 		Snd [2]int32 `ini:"snd" default:"-1,0"`
@@ -1825,12 +1832,11 @@ func loadMotif(def string) (*Motif, error) {
 	m.loadFiles()
 	sys.keepAlive()
 
-	lines, i := SplitAndTrim(motifText, "\n"), 0
-	m.AnimTable = ReadAnimationTable(m.Def, m.Sff, &m.Sff.palList, lines, &i, true)
-	i = 0
+	m.AnimTable = ReadAnimationTable(m.Def, m.Sff, &m.Sff.palList, motifText, true)
 
 	m.overrideParams()
 	m.fixLocalcoordOverrides()
+	m.inheritCursorCellOverrides()
 	m.applyGlyphDefaultsFromMovelist()
 	m.populateDataPointers()
 	m.applyPostParsePosAdjustments()
@@ -2320,6 +2326,76 @@ func (m *Motif) overrideParams() {
 	m.mergeWithInheritance(specs)
 }
 
+// Propagate p<n>.cursor.<state> parameters into their per cell "<col>-<row>" variants (wildcards included)
+func (m *Motif) inheritCursorCellOverrides() {
+	if m == nil || m.IniFile == nil {
+		return
+	}
+	sec, err := m.IniFile.GetSection("Select Info")
+	if err != nil || sec == nil {
+		return
+	}
+	re := regexp.MustCompile(`(?i)^(p[1-8]\.cursor\.(?:active|done|preview))\.([0-9*]+-[0-9*]+)\.(.+)$`)
+	variants := map[string]map[string]map[string]bool{}
+	for _, k := range sec.Keys() {
+		mt := re.FindStringSubmatch(k.Name())
+		if mt == nil {
+			continue
+		}
+		state, cell, param := strings.ToLower(mt[1]), strings.ToLower(mt[2]), strings.ToLower(mt[3])
+		if variants[state] == nil {
+			variants[state] = map[string]map[string]bool{}
+		}
+		if variants[state][cell] == nil {
+			variants[state][cell] = map[string]bool{}
+		}
+		variants[state][cell][param] = true
+	}
+	si := reflect.ValueOf(&m.SelectInfo).Elem()
+	for state, cells := range variants {
+		mapVal := si
+		for _, part := range strings.Split(state, ".") {
+			fieldVal, _, found := findFieldByINITag(mapVal, part)
+			if !found {
+				mapVal = reflect.Value{}
+				break
+			}
+			mapVal = fieldVal
+		}
+		if !mapVal.IsValid() || mapVal.Kind() != reflect.Map ||
+			mapVal.Type().Elem().Kind() != reflect.Ptr {
+			continue
+		}
+		def := mapVal.MapIndex(reflect.ValueOf("default"))
+		if !def.IsValid() || def.IsNil() {
+			continue
+		}
+		for _, key := range mapVal.MapKeys() {
+			params := cells[strings.ToLower(key.String())]
+			if params == nil {
+				continue
+			}
+			cur := mapVal.MapIndex(key)
+			if !cur.IsValid() || cur.IsNil() {
+				continue
+			}
+			merged := reflect.New(mapVal.Type().Elem().Elem())
+			merged.Elem().Set(def.Elem())
+			for param := range params {
+				if i := strings.Index(param, "."); i >= 0 {
+					param = param[:i]
+				}
+				dst, _, ok := findFieldByINITag(merged.Elem(), param)
+				src, _, found := findFieldByINITag(cur.Elem(), param)
+				if ok && found {
+					dst.Set(src)
+				}
+			}
+			mapVal.SetMapIndex(key, merged)
+		}
+	}
+}
+
 func (m *Motif) customPauseMenuSections() []string {
 	if m == nil || m.IniFile == nil {
 		return nil
@@ -2800,26 +2876,28 @@ func (m *Motif) drawLoading() {
 	ts.Reset()
 
 	sys.mainThreadTask <- func() {
-		// End previous frame
-		gfx.EndFrame()
+		if !sys.window.renderingPaused {
+			// End previous frame
+			gfx.EndFrame()
 
-		// Start a one-off frame
-		gfx.BeginFrame(true)
+			// Start a one-off frame
+			gfx.BeginFrame(true)
 
-		FillRect(sys.scrrect, 0x000000, [2]int32{255, 0}, nil)
+			FillRect(sys.scrrect, 0x000000, [2]int32{255, 0}, nil)
 
-		ts.Draw(ts.layerno)
+			ts.Draw(ts.layerno)
 
-		// Submit and present
-		gfx.EndFrame()
-		if strings.HasPrefix(gfx.GetName(), "OpenGL") {
-			sys.window.SwapBuffers()
-		} else {
-			gfx.Await()
+			// Submit and present
+			gfx.EndFrame()
+			if strings.HasPrefix(gfx.GetName(), "OpenGL") {
+				sys.window.SwapBuffers()
+			} else {
+				gfx.Await()
+			}
+
+			// Prepare a fresh frame for whatever comes next (no clear)
+			gfx.BeginFrame(false)
 		}
-
-		// Prepare a fresh frame for whatever comes next (no clear)
-		gfx.BeginFrame(false)
 	}
 	sys.runMainThreadTask()
 }
@@ -3046,6 +3124,8 @@ func (m *Motif) shouldScopeMotifAspect() bool {
 }
 
 func (m *Motif) draw(layerno int16) {
+	// Match effects use the fight viewport, even when motif overlays change aspect.
+	sys.matchStoryboards.draw(layerno)
 	if m.shouldScopeMotifAspect() {
 		prev := sys.captureAspectState()
 		sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
@@ -3086,6 +3166,7 @@ func (m *Motif) draw(layerno int16) {
 }
 
 func (m *Motif) drawFade() {
+	sys.matchStoryboards.drawFade()
 	if m.shouldScopeMotifAspect() {
 		prev := sys.captureAspectState()
 		sys.setGameSize(sys.scrrect[2], sys.scrrect[3])
@@ -4646,7 +4727,7 @@ func (di *MotifDialogue) applyToken(m *Motif, line *DialogueParsedLine, token Di
 			}
 			params := newPlaySndParams()
 			c := sys.chars[token.pn-1][0]
-			params.xPos = &c.pos[0]
+			params.sourceID = c.id
 			params.localScale = c.localscl
 			params.log = false
 
@@ -4718,8 +4799,17 @@ func (di *MotifDialogue) applyToken(m *Motif, line *DialogueParsedLine, token Di
 				return true
 			}
 			mapName, ok1 := token.value[0].(string)
-			mapVal, ok2 := token.value[1].(float32)
-			if !ok1 || !ok2 {
+			if !ok1 {
+				return false
+			}
+			// Typed from the token: numeric values stay numeric, strings are stored as text
+			var mv TypedValue
+			switch v := token.value[1].(type) {
+			case float32:
+				mv = TypedValue{Type: VT_Float, Num: float64(v)}
+			case string:
+				mv = TypedValue{Type: VT_String, Str: v}
+			default:
 				return false
 			}
 			mapOp := int32(0)
@@ -4728,7 +4818,7 @@ func (di *MotifDialogue) applyToken(m *Motif, line *DialogueParsedLine, token Di
 					mapOp = 1
 				}
 			}
-			sys.chars[token.pn-1][0].mapSet(mapName, mapVal, mapOp)
+			sys.chars[token.pn-1][0].mapSetValue(mapName, mv, mapOp)
 		}
 		return true
 	default:

@@ -2,8 +2,6 @@ package main
 
 /*
 #cgo LDFLAGS: -lxmp
-#cgo ios CFLAGS: -I/workspaces/ikemen-go-ios/deps/ios-libxmp/include
-#cgo ios LDFLAGS: -L/workspaces/ikemen-go-ios/deps/ios-libxmp/lib -lxmp
 #include <xmp.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +15,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/gopxl/beep/v2"
+	"github.com/ikemen-engine/beep/v2"
 )
 
 // ------------------------------------------------------------------

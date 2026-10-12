@@ -49,6 +49,7 @@ type Config struct {
 		Const   map[string][]string `ini:"map:^(?i)Const[0-9]*$" lua:"Const" sync:"host"`
 		States  map[string][]string `ini:"map:^(?i)States[0-9]*$" lua:"States" sync:"host"`
 		Fx      map[string][]string `ini:"map:^(?i)Fx[0-9]*$" lua:"Fx" sync:"host"`
+		Shaders map[string][]string `ini:"map:^(?i)Shaders[0-9]*$" lua:"Shaders" sync:"host"`
 		Modules map[string][]string `ini:"map:^(?i)Modules[0-9]*$" lua:"Modules" sync:"host"`
 		Lua     map[string][]string `ini:"map:^(?i)Lua[0-9]*$" lua:"Lua" sync:"host"`
 	} `ini:"Common"`
@@ -140,6 +141,7 @@ type Config struct {
 		ForceStageZoomin    float32 `ini:"ForceStageZoomin" sync:"host"`
 		ForceStageAutoZoom  bool    `ini:"ForceStageAutoZoom" sync:"host"`
 		KeepSpritesOnReload bool    `ini:"KeepSpritesOnReload"`
+		RetryLoadOnError    bool    `ini:"RetryLoadOnError"`
 		MacOSUseCommandKey  bool    `ini:"MacOSUseCommandKey"`
 		SpeedTest           int     `ini:"SpeedTest"`
 	} `ini:"Debug"`
@@ -166,6 +168,9 @@ type Config struct {
 		EnableModelShadow        bool     `ini:"EnableModelShadow"`
 		ImageSuballocThresholdKB int      `ini:"ImageSuballocThresholdKB"` // ≤ this (KB) suballocated; 0 to disable
 		ImageSuballocBlockSizeMB int      `ini:"ImageSuballocBlockSizeMB"` // block size (MB) for suballocation pool
+		VRAMFallbackEnabled      bool     `ini:"VRAMFallbackEnabled"`      // Vulkan only: master switch for VRAM→HOST_VISIBLE fallback
+		VRAMSwapThresholdPercent int      `ini:"VRAMSwapThresholdPercent"` // Vulkan only: heap % that triggers swappable texture eviction
+		VRAMSwapCooldownFrames   int      `ini:"VRAMSwapCooldownFrames"`   // Vulkan only: frames between swap attempts
 	} `ini:"Video"`
 	Sound struct {
 		SampleRate           int32   `ini:"SampleRate"`
@@ -181,6 +186,7 @@ type Config struct {
 		MaxBGMVolume         int     `ini:"MaxBGMVolume"`
 		AudioDucking         bool    `ini:"AudioDucking"`
 		AudioResampleQuality int     `ini:"AudioResampleQuality"`
+		FocusLossVolume      int     `ini:"FocusLossVolume"`
 	} `ini:"Sound"`
 	Arcade struct {
 		AI struct {
@@ -201,6 +207,8 @@ type Config struct {
 	} `ini:"Arcade"`
 	Netplay struct {
 		ListenPort      int                `ini:"ListenPort"`
+		SyncTimeout     int                `ini:"SyncTimeout" sync:"host"`
+		LoadingTimeout  int                `ini:"LoadingTimeout" sync:"host"`
 		RollbackNetcode bool               `ini:"RollbackNetcode" sync:"strict"`
 		IP              map[string]string  `ini:"IP" insensitivekeys:"false"`
 		Rollback        RollbackProperties `ini:"Rollback"`
@@ -365,6 +373,7 @@ func (c *Config) normalize() {
 	c.SetValueUpdate("Sound.MaxBGMVolume", int(Clamp(int32(c.Sound.MaxBGMVolume), 100, 250)))
 	c.SetValueUpdate("Sound.PanningRange", Clamp(c.Sound.PanningRange, 0, 100))
 	c.SetValueUpdate("Sound.PauseMasterVolume", int(Clamp(int32(c.Sound.PauseMasterVolume), 0, 100)))
+	c.SetValueUpdate("Sound.FocusLossVolume", int(Clamp(int32(c.Sound.FocusLossVolume), 0, 100)))
 	c.SetValueUpdate("Sound.WavChannels", Clamp(c.Sound.WavChannels, 1, 256))
 
 	switch c.Video.MSAA {

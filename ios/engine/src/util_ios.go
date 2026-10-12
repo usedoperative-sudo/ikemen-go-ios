@@ -3,18 +3,19 @@
 package main
 
 /*
-#cgo CFLAGS: -DSDL_MAIN_HANDLED
-#cgo ios CFLAGS: -I/workspaces/ikemen-go-ios/deps/ios-sdl/include/SDL2
-#cgo ios LDFLAGS: -framework OpenGLES
 #include <stdlib.h>
-#include <string.h>
+#include <unistd.h>
 #include "SDL.h"
-#include "iosgl.h"
+#include "SDLWindowFix.h"
 
-// Provided by the app wrapper (main.m): returns the Documents base dir
-// (malloc'd) or NULL. Decouples base-dir resolution from the environment, which
-// Go's runtime may not observe if IKEMEN_BASE_DIR is set after Go init.
-char* IOSGameBaseDir(void);
+// THIS IS THE KEY: A C constructor.
+// This runs when the .framework is loaded, BEFORE Go starts itself up.
+__attribute__((constructor))
+static void prepare_go_runtime(void) {
+    // cgocheck=0: Stop Go from scanning memory pointers (prevents possible crashes)
+    // scavenge=off: Stop the background memory reclaimer thread
+    setenv("GODEBUG", "asyncpreemptoff=1,cgocheck=0", 1);
+}
 */
 import "C"
 import (
@@ -23,46 +24,16 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"unsafe"
 
 	findfont "github.com/flopp/go-findfont"
 )
 
-var (
-	iosLogFileMtx sync.Mutex
-	iosLogFile    *os.File
-)
-
-// initIOSFileLog opens save/logs/engine.log and redirects os.Stdout and
-// os.Stderr into it, so every print/Logcat lands in the sandbox (curl-able
-// via the debug server) for on-device diagnostics. Call this once
-// sys.baseDir is known (iOS branch).
-func initIOSFileLog() {
-	logDir := filepath.Join(sys.baseDir, "save", "logs")
-	os.MkdirAll(logDir, 0755)
-	logPath := filepath.Join(logDir, "engine.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		// Keep stderr pointing at the device console and fall through
-		return
-	}
-
-	// Prepare two independent handles so closing one later won't poison the other.
-	stdout := os.NewFile(f.Fd(), "engine.log-stdout")
-	stderr := os.NewFile(f.Fd(), "engine.log-stderr")
-
-	iosLogFileMtx.Lock()
-	iosLogFile = f
-	iosLogFileMtx.Unlock()
-
-	os.Stdout = stdout
-	os.Stderr = stderr
-	Logcat("=== IKEMEN engine.log opened: " + logPath + " ===")
+func init() {
 }
 
 // Log writer implementation
-// On iOS, Stderr goes to the device/system log
+// On iOS, writing to Stderr redirects to the console output we want
 func NewLogWriter() io.Writer {
 	return os.Stderr
 }
@@ -70,11 +41,14 @@ func NewLogWriter() io.Writer {
 // TTF font loading
 func LoadFntTtf(f *Fnt, fontfile string, filename string, height int32) {
 	// 1. Path resolution
+	// Attempt to find the file using the engine's SearchFile utility
 	fileDir := SearchFile(filename, []string{fontfile, sys.motif.Def, "", "data/"}, "font/")
 
 	// 2. iOS Path Correction
+	// If the path isn't absolute and doesn't exist, anchor it to the SDL storage path
 	if !filepath.IsAbs(fileDir) && FileExist(fileDir) == "" {
-		fullPath := filepath.Join(getIOSDocumentsDir(), fileDir)
+		fullPath := filepath.Join(sys.baseDir, fileDir)
+
 		if FileExist(fullPath) != "" {
 			fileDir = fullPath
 		}
@@ -99,6 +73,7 @@ func LoadFntTtf(f *Fnt, fontfile string, filename string, height int32) {
 	// 3. Load the TTF
 	ttf, err := gfxFont.LoadFont(fileDir, height, int(sys.gameWidth), int(sys.gameHeight))
 	if err != nil {
+		// Instead of a pure panic, log exactly where it looked
 		Logcat(fmt.Sprintf("ERROR: Failed to load TTF from %s", fileDir))
 		panic(fmt.Errorf("failed to load ttf font %v: %w", fileDir, err))
 	}
@@ -113,6 +88,7 @@ func LoadFntTtf(f *Fnt, fontfile string, filename string, height int32) {
 }
 
 // Message box implementation
+// iOS doesn't have a simple "dialog" package like desktop.
 func ShowInfoDialog(message, title string) {
 	Logcat(fmt.Sprintf("INFO [%s]: %s", title, message))
 }
@@ -121,48 +97,62 @@ func ShowErrorDialog(message string) {
 	Logcat(fmt.Sprintf("CRITICAL ERROR: %s", message))
 }
 
+func ShowRetryDialog(message string) bool {
+	return false
+}
+
 //export SDL_main
 func SDL_main(argc C.int, argv **C.char) C.int {
 	runtime.LockOSThread()
+
+	// Get our args (we should have these from the Obj-C bridge)
+	count := int(argc)
+	var args []string
+	if count > 0 && argv != nil {
+		cargs := unsafe.Slice((**C.char)(unsafe.Pointer(argv)), count)
+
+		args = make([]string, count)
+		for i, arg := range cargs {
+			if arg != nil {
+				args[i] = C.GoString(arg)
+			}
+		}
+	}
+
+	// Set the baseDir before starting
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--assets" {
+			sys.baseDir = args[i+1]
+			break
+		}
+	}
+
+	Logcat("SDL_main: Path ready, jumping to realMain")
+
+	// Call realMain NOW that we're on the main thread
 	realMain()
+
 	return 0
 }
 
-func iosGetProcAddress(name string) unsafe.Pointer {
-	cname := C.CString(name)
-	defer C.free(unsafe.Pointer(cname))
-	return C.iosGetProcAddress(cname)
-}
-
 func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
-	return &Renderer_IOS{}, &FontRenderer_IOS{}
-}
-
-// getIOSDocumentsDir returns the app's Documents/ikemen-go/IkemenGo directory,
-// which is exposed via iOS file sharing / the Files app for easy custom
-// stage/char/data additions. The wrapper (main.m) seeds this directory with the
-// IKEMEN data tree and hands its path to us through IOSGameBaseDir(). We fall
-// back to SDL_GetPrefPath if it's unavailable (e.g. running on desktop).
-func getIOSDocumentsDir() string {
-	if dir := C.IOSGameBaseDir(); dir != nil {
-		defer C.free(unsafe.Pointer(dir))
-		if s := C.GoString(dir); s != "" {
-			return s
-		}
-	}
-	dir := C.SDL_GetPrefPath(C.CString("ikemen-go"), C.CString("IkemenGo"))
-	if dir == nil {
-		return "."
-	}
-	defer C.SDL_free(unsafe.Pointer(dir))
-	return C.GoString(dir)
-}
-
-// osPreferredLanguage is not available without Foundation/ObjC on iOS.
-func osPreferredLanguage() string {
-	return ""
+	return &Renderer_VK{}, &FontRenderer_VK{}
 }
 
 func Logcat(s string) {
-	fmt.Fprintln(os.Stderr, s)
+	fmt.Fprintln(os.Stderr, "[ikemen]", s)
+}
+
+//export GetMoltenVKWindowID
+func GetMoltenVKWindowID() C.uint32_t {
+	if sys.window == nil || sys.window.Window == nil {
+		Logcat("GetMoltenVKWindowID: window not yet created")
+		return 0
+	}
+	winID, e := sys.window.Window.GetID()
+	if e != nil {
+		Logcat(fmt.Sprintf("GetMoltenVKWindowID: %v", e))
+		return 0
+	}
+	return C.uint32_t(winID)
 }

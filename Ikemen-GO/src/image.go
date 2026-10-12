@@ -56,7 +56,6 @@ func newPalFXDef() *PalFXDef {
 
 type PalFX struct {
 	PalFXDef
-	remap          []int
 	allowNeg       bool // Can use negative color math
 	sintime        [4]int32
 	enable         bool
@@ -69,11 +68,8 @@ type PalFX struct {
 	eColor         float32
 	eHue           float32
 	eInterpolate   bool
-	eiAdd          [3]int32
-	eiMul          [3]int32
-	eiColor        float32
-	eiHue          float32
 	eiTime         int32
+	remap          []int // TODO: This isn't color math so it probably should be in a different struct
 }
 
 func newPalFX() *PalFX {
@@ -92,36 +88,26 @@ func (pf *PalFX) clear() {
 	pf.clearWithNeg(false)
 }
 
-func (pf *PalFX) getSynFx(blendMode TransType, alpha [2]int32) *PalFX {
-	if pf != nil && pf.ignoreAllPalFX {
-		return pf
-	}
-
-	if pf == nil || !pf.enable {
-		if blendMode == TT_sub && sys.allPalFX.enable {
-			if pf == nil {
-				pf = newPalFX()
-			}
-			pf.clear()
-			pf.enable = true
-			pf.eMul = pf.mul
-			pf.eAdd = pf.add
-			pf.eColor = pf.color
-			pf.eHue = pf.hue
-		} else {
-			return sys.allPalFX
-		}
-	}
-
-	if !sys.allPalFX.enable {
-		return pf
-	}
-
-	synth := *pf
-	synth.synthesize(sys.allPalFX, blendMode, alpha)
-	return &synth
+// The identity transform. Leaves colors untouched
+func identityPalFX() PalFX {
+	p := PalFX{PalFXDef: *newPalFXDef()}
+	p.enable = true
+	p.eMul = p.mul
+	p.eColor = p.color
+	return p
 }
 
+// Returns the effect as a plain value, ready to compose
+func (pf *PalFX) sample() PalFX {
+	// An effect that isn't running samples as the identity, so its stale effective values can never escape
+	if pf == nil || !pf.enable {
+		return identityPalFX()
+	}
+	return *pf
+}
+
+// Dead code. Both call sites are commented out
+/*
 func (pf *PalFX) getFxPal(blendMode TransType, pal []uint32, neg bool) []uint32 {
 	p := pf.getSynFx(blendMode, [2]int32{0, 0})
 	if !p.enable {
@@ -173,34 +159,49 @@ func (pf *PalFX) getFxPal(blendMode TransType, pal []uint32, neg bool) []uint32 
 	}
 	return sys.workpal
 }
+*/
 
-func (pf *PalFX) getFinalPalFx(blendMode TransType, alpha [2]int32) (state ShaderPalFX) {
-	p := pf.getSynFx(blendMode, alpha)
+// Evaluates the effect, and AllPalFX on top of it, into the transform the renderer consumes
+func (pf *PalFX) getFinalPalFx(blendMode TransType, alpha [2]int32) ShaderPalFX {
+	own := pf.sample()
 
-	if !p.enable {
-		state.neg = false
-		state.gray = 0
-		state.add = [3]float32{0, 0, 0}
-		state.mult = [3]float32{1, 1, 1}
-		state.hue = 0
-		state.invblend = 0
-		return
+	if pf != nil && pf.ignoreAllPalFX {
+		return own.toShader(blendMode)
 	}
 
-	state.neg = p.eInvertall
-	state.gray = 1 - p.eColor
-	state.invblend = p.eInvertblend
-	state.hue = p.eHue
+	// With no effect of our own, AllPalFX applies directly
+	// TODO: Sub composes instead, which differs in invblend. Looks accidental
+	if (pf == nil || !pf.enable) && blendMode != TT_sub {
+		all := sys.allPalFX.sample()
+		return all.toShader(blendMode)
+	}
+
+	// Only needed because stacked() isn't a no-op under Sub. See its TODO
+	if !sys.allPalFX.enable {
+		return own.toShader(blendMode)
+	}
+
+	all := sys.allPalFX.sample()
+	combined := own.stacked(all, blendMode, alpha)
+	return combined.toShader(blendMode)
+}
+
+// Converts the effective values into shader uniforms
+func (pf PalFX) toShader(blendMode TransType) (state ShaderPalFX) {
+	state.neg = pf.eInvertall
+	state.gray = 1 - pf.eColor
+	state.invblend = pf.eInvertblend
+	state.hue = pf.eHue
 
 	// Determine if we use negative color math based on blendMode
-	useNeg := blendMode == TT_sub && p.eAllowNeg
+	useNeg := blendMode == TT_sub && pf.eAllowNeg
 
-	for i, v := range p.eAdd {
+	for i, v := range pf.eAdd {
 		state.add[i] = float32(v) / 255
 		if useNeg {
-			state.mult[i] = float32(p.eMul[(i+1)%3]+p.eMul[(i+2)%3]) / 512
+			state.mult[i] = float32(pf.eMul[(i+1)%3]+pf.eMul[(i+2)%3]) / 512
 		} else {
-			state.mult[i] = float32(p.eMul[i]) / 256
+			state.mult[i] = float32(pf.eMul[i]) / 256
 		}
 	}
 	return
@@ -258,6 +259,9 @@ func (pf *PalFX) sinHueshift(color *float32) {
 	}
 }
 
+// Dead code. Never called, and duplicated the interpolate branch of refresh()
+// Note the ei* scratch fields it used no longer exist, so this won't compile as-is
+/*
 func (pf *PalFX) interpolationUpdate() {
 	if pf.eiTime < pf.itime {
 		pf.eiTime++
@@ -274,6 +278,7 @@ func (pf *PalFX) interpolationUpdate() {
 	pf.eiHue = Lerp(pf.ihue[1], pf.ihue[0], t)
 	pf.eHue = pf.eiHue + pf.hue
 }
+*/
 
 // Updates the effective values. Does not step timers
 // Explods need this separation because they appear at tickFrame() but their PalFX only updates at tickNextFrame()
@@ -292,15 +297,13 @@ func (pf *PalFX) refresh() {
 			t = float32(pf.eiTime) / float32(pf.itime)
 		}
 		for i := 0; i < 3; i++ {
-			pf.eiMul[i] = int32(Lerp(float32(pf.imul[i+3]), float32(pf.imul[i]), t))
-			pf.eMul[i] = int32(float32(pf.eiMul[i]) * float32(pf.mul[i]) / 256)
-			pf.eiAdd[i] = int32(Lerp(float32(pf.iadd[i+3]), float32(pf.iadd[i]), t))
-			pf.eAdd[i] = pf.eiAdd[i] + pf.add[i]
+			iMul := int32(Lerp(float32(pf.imul[i+3]), float32(pf.imul[i]), t))
+			pf.eMul[i] = int32(float32(iMul) * float32(pf.mul[i]) / 256)
+			iAdd := int32(Lerp(float32(pf.iadd[i+3]), float32(pf.iadd[i]), t))
+			pf.eAdd[i] = iAdd + pf.add[i]
 		}
-		pf.eiColor = Lerp(pf.icolor[1], pf.icolor[0], t)
-		pf.eColor = pf.eiColor * pf.color
-		pf.eiHue = Lerp(pf.ihue[1], pf.ihue[0], t)
-		pf.eHue = pf.eiHue + pf.hue
+		pf.eColor = Lerp(pf.icolor[1], pf.icolor[0], t) * pf.color
+		pf.eHue = Lerp(pf.ihue[1], pf.ihue[0], t) + pf.hue
 	} else {
 		// Static values
 		pf.eMul = pf.mul
@@ -326,7 +329,9 @@ func (pf *PalFX) refresh() {
 
 // Only responsible for stepping the timers
 func (pf *PalFX) tickTimers() {
-	if !pf.enable || !sys.tickFrame() {
+	// The caller decides if tickFrame is correct or not
+	//if !pf.enable || !sys.tickFrame() {
+	if !pf.enable {
 		return
 	}
 	for i := 0; i < 4; i++ {
@@ -348,7 +353,10 @@ func (pf *PalFX) step() {
 	pf.tickTimers()
 }
 
-func (pf *PalFX) synthesize(pfx *PalFX, blendMode TransType, alpha [2]int32) {
+// Composes two effects. The receiver is applied first
+// TODO: Stacking the identity should be a no-op, but isn't under Sub, which forces callers to guard
+func (base PalFX) stacked(extra PalFX, blendMode TransType, alpha [2]int32) PalFX {
+	pf, pfx := base, extra
 	if blendMode == TT_sub {
 		for i, a := range pfx.eAdd {
 			pf.eAdd[i] = Clamp(pf.eAdd[i]-Abs(a), 0, 255)
@@ -405,44 +413,46 @@ func (pf *PalFX) synthesize(pfx *PalFX, blendMode TransType, alpha [2]int32) {
 		}
 	}
 
+	return pf
 }
 
-// Returns a copy of the PalFX with font frgba applied as a base color
+// Returns a copy of the PalFX with another one stacked on top
+// Used so a BG's own PalFX and a global BGPalFX can stack
+func (pf *PalFX) withStacked(extra *PalFX, blendMode TransType, alpha [2]int32) *PalFX {
+	// No extra. Do nothing
+	// Only needed because stacked() isn't a no-op under Sub. See its TODO
+	if extra == nil || !extra.enable {
+		return pf
+	}
+	if pf == nil || !pf.enable {
+		out := *extra
+		return &out
+	}
+
+	base := pf.sample()
+	top := extra.sample()
+	out := base.stacked(top, blendMode, alpha)
+
+	return &out
+}
+
+// Returns a copy of the PalFX with a base color stacked on top
 // To do this perfectly correctly we'd need more shader uniforms
 // However, this should still be better than making font color parameter overwrite PalFX like before
-func (pf *PalFX) withFontRgba(frgba [4]float32) *PalFX {
-	usesColor := frgba[0] != 1.0 || frgba[1] != 1.0 || frgba[2] != 1.0
-	if !usesColor {
+func (pf *PalFX) withStackedColor(r, g, b float32) *PalFX {
+	if r == 1.0 && g == 1.0 && b == 1.0 {
 		return pf
 	}
 
-	var pfx *PalFX
-	if pf == nil {
-		// No existing PalFX: create a new one because RenderSprite expects a non-nil PalFX to apply color
-		pfx = newPalFX()
-	} else {
-		// Create a shallow copy of the original PalFX
-		tmp := *pf
-		pfx = &tmp
-	}
+	// Check current state
+	out := pf.sample()
 
-	// Force the copy to be enabled
-	pfx.enable = true
+	// Stack RGB on top of eMul
+	out.eMul[0] = int32(float32(out.eMul[0]) * r)
+	out.eMul[1] = int32(float32(out.eMul[1]) * g)
+	out.eMul[2] = int32(float32(out.eMul[2]) * b)
 
-	// Check status of the original PalFX
-	if pf == nil || (!pf.enable && pf.time == 0) {
-		// Uninitialized or disabled: set color directly from frgba
-		pfx.eMul[0] = int32(256 * frgba[0])
-		pfx.eMul[1] = int32(256 * frgba[1])
-		pfx.eMul[2] = int32(256 * frgba[2])
-	} else {
-		// Active: stack frgba on top of existing eMul
-		pfx.eMul[0] = int32(float32(pf.eMul[0]) * frgba[0])
-		pfx.eMul[1] = int32(float32(pf.eMul[1]) * frgba[1])
-		pfx.eMul[2] = int32(float32(pf.eMul[2]) * frgba[2])
-	}
-
-	return pfx
+	return &out
 }
 
 type Palette struct {
@@ -847,24 +857,43 @@ func (s *Sprite) SetPxl(px []byte) {
 		return
 	}
 	sys.mainThreadTask <- func() {
-		s.Tex = gfx.newTexture(int32(s.Size[0]), int32(s.Size[1]), 8, false)
+		tex, err := gfx.newTexture(int32(s.Size[0]), int32(s.Size[1]), 8, false)
+		if err != nil {
+			LogMessage("[VRAM] SetPxl newTexture failed: %v", err)
+			return
+		}
+		s.Tex = tex
 		s.Tex.SetData(px)
 	}
 }
 
 func (s *Sprite) SetRaw(data []byte, sprWidth int32, sprHeight int32, sprDepth int32) {
 	if sprDepth == 32 {
-		// Normalize fully transparent RGBA pixels to prevent their RGB values from bleeding into visible pixels
+		// Convert straight RGBA to premultiplied, which the renderer expects
+		// This also lets bilinear filtering blend sprite edges correctly
+		// Fully transparent pixels are zeroed so their RGB can't bleed into visible pixels
 		for i := 0; i+3 < len(data); i += 4 {
-			if data[i+3] == 0 {
-				data[i] = 0
-				data[i+1] = 0
-				data[i+2] = 0
+			a := data[i+3]
+			if a == 255 {
+				continue
 			}
+			if a == 0 {
+				data[i], data[i+1], data[i+2] = 0, 0, 0
+				continue
+			}
+			// Matches Go's color.NRGBA to color.RGBA conversion
+			data[i] = uint8((uint32(data[i]) * 0x101 * uint32(a) / 0xff) >> 8)
+			data[i+1] = uint8((uint32(data[i+1]) * 0x101 * uint32(a) / 0xff) >> 8)
+			data[i+2] = uint8((uint32(data[i+2]) * 0x101 * uint32(a) / 0xff) >> 8)
 		}
 	}
 	sys.mainThreadTask <- func() {
-		s.Tex = gfx.newTexture(sprWidth, sprHeight, sprDepth, sys.cfg.Video.RGBSpriteBilinearFilter)
+		tex, err := gfx.newTexture(sprWidth, sprHeight, sprDepth, sys.cfg.Video.RGBSpriteBilinearFilter)
+		if err != nil {
+			LogMessage("[VRAM] SetRaw newTexture failed: %v", err)
+			return
+		}
+		s.Tex = tex
 		s.Tex.SetData(data)
 	}
 }
@@ -1309,7 +1338,6 @@ func (s *Sprite) readV2(f io.ReadSeeker, offset int64, datasize uint32) error {
 		f.Seek(offset+4, 0)
 		format := -s.rle
 
-		var rgba *image.RGBA
 		var rect image.Rectangle
 
 		if 2 <= format && format <= 4 {
@@ -1340,23 +1368,18 @@ func (s *Sprite) readV2(f io.ReadSeeker, offset int64, datasize uint32) error {
 				px = pi.Pix
 			}
 		case 11, 12:
-			var ok bool = false
 			isRaw = true
 
-			// Decode PNG image to RGBA
+			// Decode PNG image to straight RGBA, which SetRaw() premultiplies for the renderer
 			img, err := png.Decode(f)
 			if err != nil {
 				return err
 			}
 
 			rect = img.Bounds()
-			rgba, ok = img.(*image.RGBA)
-
-			if !ok {
-				rgba = image.NewRGBA(rect)
-				draw.Draw(rgba, rect, img, rect.Min, draw.Src)
-			}
-			s.SetRaw(rgba.Pix, int32(rect.Max.X-rect.Min.X), int32(rect.Max.Y-rect.Min.Y), 32)
+			nrgba := image.NewNRGBA(rect)
+			draw.Draw(nrgba, rect, img, rect.Min, draw.Src)
+			s.SetRaw(nrgba.Pix, int32(rect.Max.X-rect.Min.X), int32(rect.Max.Y-rect.Min.Y), 32)
 		default:
 			return Error("Unknown format")
 		}
@@ -1398,6 +1421,10 @@ func (s *Sprite) CachePalTex(pal []uint32) Texture {
 }
 
 func (s *Sprite) Draw(x, y, xscale, yscale float32, rxadd float32, rot Rotation, projectionMode int32, fLength float32, fx *PalFX, window *[4]int32) {
+	if s.Tex == nil {
+		return
+	}
+
 	x += float32(sys.gameWidth-320)/2 - xscale*float32(s.Offset[0])
 	y += float32(sys.gameHeight-240) - yscale*float32(s.Offset[1])
 	var rcx, rcy float32
@@ -2234,24 +2261,9 @@ func (s *Sff) cloneSpriteWithPal(g, n uint16, pl *PaletteList) *Sprite {
 	return &osp
 }
 
-func captureScreen() {
-	width, height := sys.window.GetSize()
-	pixdata := make([]uint8, 4*width*height)
-	img := image.NewNRGBA(image.Rect(0, 0, width, height))
-	gfx.ReadPixels(pixdata, width, height)
-	for i := 0; i < 4*width*height; i++ {
-		j := i
-		if gfx.GetName() != "Vulkan 1.3.239" {
-			var x, y int
-			x = i % (width * 4)
-			y = i / (width * 4)
-			j = x + (height-1-y)*width*4
-		}
-		if i%4 == 3 {
-			pixdata[i] = 255 // Set the alpha value to 255
-		}
-		img.Pix[j] = pixdata[i]
-	}
+func requestScreenshot() {
+	var size [2]int
+	size[0], size[1] = sys.window.GetSize()
 
 	// Sanitize WindowTitle for use in filenames
 	re := regexp.MustCompile(`[<>:"/\\|?*]`)
@@ -2262,14 +2274,54 @@ func captureScreen() {
 		safeTitle = "ikemen"
 	}
 
+	filename := ""
 	for i := sys.captureNum; i < 999; i++ {
-		filename := fmt.Sprintf("%s%s%03d.png", sys.cfg.Config.ScreenshotFolder, safeTitle, i)
-		if _, err := os.Stat(filename); os.IsNotExist(err) {
-			file, _ := os.Create(filename)
-			defer file.Close()
-			png.Encode(file, img)
-			sys.captureNum = i
+		candidate := fmt.Sprintf("%s%s%03d.png", sys.cfg.Config.ScreenshotFolder, safeTitle, i)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			sys.captureNum = i + 1
+			filename = candidate
 			break
 		}
 	}
+	if filename == "" {
+		return
+	}
+
+	sys.screenshotSize = size
+	sys.screenshotFile = filename
+	gfx.BeginScreenshot(size[0], size[1])
+}
+
+// Worker goroutine. No GL calls, no sys.captureNum access.
+func saveScreenshot(data []uint8, width, height int, filename string) {
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+
+	// GL returns rows bottom-up; Go images are top-down
+	// Vulkan hands back top-down already, so it doesn't need the flip
+	rowBytes := width * 4
+	if gfx.GetName() == "Vulkan 1.3.239" {
+		copy(img.Pix, data)
+	} else {
+		for y := 0; y < height; y++ {
+			src := data[(height-1-y)*rowBytes : (height-y)*rowBytes]
+			dst := img.Pix[y*rowBytes : (y+1)*rowBytes]
+			copy(dst, src)
+		}
+	}
+
+	// Force the alpha channel opaque in a single linear pass
+	// Previously this loop ran for each pixel on screen
+	for i := 3; i < len(img.Pix); i += 4 {
+		img.Pix[i] = 255
+	}
+
+	file, err := os.Create(filename)
+	if err != nil {
+		LogMessage("Screenshot save failed: %v", err)
+		return
+	}
+	if err := png.Encode(file, img); err != nil {
+		LogMessage("Screenshot encode failed: %v", err)
+	}
+	file.Close()
 }

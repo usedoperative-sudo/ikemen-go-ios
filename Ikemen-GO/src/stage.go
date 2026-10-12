@@ -528,7 +528,17 @@ func (bg *backGround) changeAnim(animNo int32, table AnimationTable) {
 }
 
 func (bg backGround) draw(pos [2]float32, drawscl, bgscl, stglscl float32,
-	stgscl [2]float32, shakeY float32, isStage bool) {
+	stgscl [2]float32, shakeY float32, isStage bool, overdrawClip [4]int32) {
+	bg.drawTransformed(pos, drawscl, bgscl, stglscl, stgscl, shakeY, isStage, overdrawClip, nil)
+}
+
+func (bg backGround) drawTransformed(pos [2]float32, drawscl, bgscl, stglscl float32,
+	stgscl [2]float32, shakeY float32, isStage bool, overdrawClip [4]int32, transform *bgDrawTransform) {
+
+	applyTransform := transform != nil && transform.space != Space_none
+
+	// Combine stage scale with the localcoord scale
+	lscl := [2]float32{stglscl * stgscl[0], stglscl * stgscl[1]}
 
 	// Handle parallax scaling (type = 2)
 	scalestartX := bg.scalestart[0]
@@ -540,57 +550,60 @@ func (bg backGround) draw(pos [2]float32, drawscl, bgscl, stglscl float32,
 		bg.anim.isParallax = true
 	}
 
-	// Calculate raster x ratio and base x scale
+	// Raster ratio and bottom x scale of a parallax BG
 	xras := (bg.rasterx[1] - bg.rasterx[0]) / bg.rasterx[0]
-	xbs, dx := bg.xscale[1], Max(0, bg.delta[0]*bgscl)
+	xbs := bg.xscale[1]
+	deltaX := Max(0, bg.delta[0]*bgscl)
+	deltaY := Max(0, bg.delta[1]*bgscl)
 
-	// Initialize local scaling factors
-	var sclx_recip, sclx, scly float32 = 1, 1, 1
-	lscl := [...]float32{stglscl * stgscl[0], stglscl * stgscl[1]}
-
-	// Handle zoom scaling if zoomdelta is specified
-	var Yzoomdelta float32 = 1
+	// Handle zoom scaling
+	var zoomX, zoomY, yZoomDelta, xRecip float32 = 1, 1, 1, 1
 	if bg.zoomdelta[0] != math.MaxFloat32 {
-		sclx = drawscl + (1-drawscl)*(1-bg.zoomdelta[0])
-		scly = drawscl + (1-drawscl)*(1-bg.zoomdelta[1])
-		Yzoomdelta = bg.zoomdelta[1]
+		// With zoomdelta
+		zoomX = drawscl + (1-drawscl)*(1-bg.zoomdelta[0])
+		zoomY = drawscl + (1-drawscl)*(1-bg.zoomdelta[1])
+		yZoomDelta = bg.zoomdelta[1]
 		if !bg.autoresizeparallax {
-			sclx_recip = 1 + bg.zoomdelta[0]*((1/(sclx*lscl[0])*lscl[0])-1)
+			// lscl[0] cancels itself out here
+			//xRecip = 1 + bg.zoomdelta[0]*((1/(zoomX*lscl[0])*lscl[0])-1)
+			xRecip = 1 + bg.zoomdelta[0]*(1/zoomX-1)
 		}
 	} else {
-		sclx = Max(0, drawscl+(1-drawscl)*(1-dx))
-		scly = Max(0, drawscl+(1-drawscl)*(1-Max(0, bg.delta[1]*bgscl)))
-		Yzoomdelta = Max(0, bg.delta[1]*bgscl)
+		// Without zoomdelta. Just use normal delta
+		zoomX = Max(0, drawscl+(1-drawscl)*(1-deltaX))
+		zoomY = Max(0, drawscl+(1-drawscl)*(1-deltaY))
+		yZoomDelta = deltaY
 	}
 
-	// Adjust x scale and x bottom zoom if autoresizeparallax is enabled
-	if sclx != 0 && bg.autoresizeparallax {
-		tmp := 1 / sclx
+	// Autoresizeparallax keeps the BG covering the screen, so undo the zoom on its width
+	if zoomX != 0 && bg.autoresizeparallax {
+		bottomDelta := deltaX
 		if bg.xbottomzoomdelta != math.MaxFloat32 {
-			xbs *= Max(0, drawscl+(1-drawscl)*(1-bg.xbottomzoomdelta*(xbs/bg.xscale[0]))) * tmp
-		} else {
-			xbs *= Max(0, drawscl+(1-drawscl)*(1-dx*(xbs/bg.xscale[0]))) * tmp
+			bottomDelta = bg.xbottomzoomdelta
 		}
-		tmp *= Max(0, drawscl+(1-drawscl)*(1-dx*(xras+1)))
-		xras -= tmp - 1
-		xbs *= tmp
+		unzoom := 1 / zoomX
+		xbs *= Max(0, drawscl+(1-drawscl)*(1-bottomDelta*(xbs/bg.xscale[0]))) * unzoom
+		unzoom *= Max(0, drawscl+(1-drawscl)*(1-deltaX*(xras+1)))
+		xras -= unzoom - 1
+		xbs *= unzoom
 	}
 
 	// Adjust scaling based on zoomscaledelta if available
 	var xs3, ys3 float32 = 1, 1
 	if bg.zoomscaledelta[0] != math.MaxFloat32 {
-		xs3 = (drawscl + (1-drawscl)*(1-bg.zoomscaledelta[0])) / sclx
+		xs3 = (drawscl + (1-drawscl)*(1-bg.zoomscaledelta[0])) / zoomX
 	}
 	if bg.zoomscaledelta[1] != math.MaxFloat32 {
-		ys3 = (drawscl + (1-drawscl)*(1-bg.zoomscaledelta[1])) / scly
+		ys3 = (drawscl + (1-drawscl)*(1-bg.zoomscaledelta[1])) / zoomY
 	}
 
-	// This handles the flooring of the camera position in MUGEN versions earlier than 1.0.
+	// Scroll the BG against the camera
 	var x, yScrollPos float32
 	if bg.roundpos {
+		// This handles the flooring of the camera position in MUGEN versions earlier than 1.0.
 		x = bg.start[0] + bg.xofs - float32(Floor(pos[0]/stgscl[0]))*bg.delta[0] + bg.bga.offset[0]
 		yScrollPos = float32(Floor(pos[1]/drawscl/stgscl[1])) * bg.delta[1]
-		for i := 0; i < 2; i++ {
+		for i := range pos {
 			pos[i] = float32(math.Floor(float64(pos[i])))
 		}
 	} else {
@@ -600,14 +613,14 @@ func (bg backGround) draw(pos [2]float32, drawscl, bgscl, stglscl float32,
 	}
 
 	y := bg.start[1] - yScrollPos + bg.bga.offset[1]
+	x *= bgscl
 
-	//In MUGEN, if Boundhigh is a positive value, the reference pos of yscaledelta will change
+	// In MUGEN, if Boundhigh is a positive value, the reference pos of yscaledelta will change
 	var positiveBoundhigh float32
 	if isStage && sys.cam.boundhigh > 0 {
 		positiveBoundhigh = float32(sys.cam.boundhigh) * bg.delta[1] * bgscl / drawscl / stgscl[1]
 	}
-	// Calculate Y scaling based on vertical scroll position and delta
-	ys2 := bg.scaledelta[1] * pos[1] * bg.delta[1] * bgscl / drawscl / stgscl[1]
+
 	// MUGEN calculates stages yscaledelta using a reciprocal scale factor.
 	// The previous linear formula caused noticeable vertical scaling differences
 	// at certain camera positions, especially at 4:3 resolutions.
@@ -619,23 +632,27 @@ func (bg backGround) draw(pos [2]float32, drawscl, bgscl, stglscl float32,
 		ysdelta = -ysdelta
 	}
 
+	// Scale contributed by the scroll position
+	ys2 := bg.scaledelta[1] * pos[1] * bg.delta[1] * bgscl / drawscl / stgscl[1]
 	ys := (100/ysdelta)*bg.scalestart[1]*bgscl + ys2
 	xs := bg.scaledelta[0] * pos[0] * bg.delta[0] * bgscl / stgscl[0]
-	x *= bgscl
 
-	// Apply stage logic if BG is part of a stage
+	// Camera corrections
 	if isStage {
+		// Apply stage logic if BG is part of a stage
 		zoff := float32(sys.cam.zoffset) * stglscl
-		y = y*bgscl + ((zoff-shakeY)/scly-zoff)/stglscl/stgscl[1]
-		y -= sys.cam.aspectcorrection / (scly * stglscl * stgscl[1])
-		y -= (sys.cam.zoomanchorcorrection / (scly * stglscl * stgscl[1])) * Yzoomdelta
+		y = y*bgscl + ((zoff-shakeY)/zoomY-zoff)/stglscl/stgscl[1]
+		y -= sys.cam.aspectcorrection / (zoomY * stglscl * stgscl[1])
+		y -= (sys.cam.zoomanchorcorrection / (zoomY * stglscl * stgscl[1])) * yZoomDelta
+	} else if !applyTransform {
+		y = y*bgscl + ((float32(sys.gameHeight)-shakeY)/stglscl/zoomY-240)/stgscl[1]
 	} else {
-		y = y*bgscl + ((float32(sys.gameHeight)-shakeY)/stglscl/scly-240)/stgscl[1]
+		y *= bgscl
 	}
 
-	// Final scaling factors
-	sclx *= lscl[0]
-	scly *= stglscl * stgscl[1]
+	// Final screen scale
+	sclx := zoomX * lscl[0]
+	scly := zoomY * stglscl * stgscl[1]
 
 	// Calculate window scale
 	var wscl [2]float32
@@ -650,103 +667,143 @@ func (bg backGround) draw(pos [2]float32, drawscl, bgscl, stglscl float32,
 	// Convert the window's raw (x1,y1,x2,y2) corners into (x1,y1,width,height)
 	// With "window" (x2,y2) is inclusive, but with "maskwindow" it's exclusive
 	rect := NormalizeRect(bg.startrect)
-	if !bg.hasMaskwindow {
-		rect[2] = Max(0, rect[2]-rect[0]+1)
-		rect[3] = Max(0, rect[3]-rect[1]+1)
-	} else {
-		rect[2] = Max(0, rect[2]-rect[0])
-		rect[3] = Max(0, rect[3]-rect[1])
+	winW := float32(Max(0, rect[2]-rect[0]+1))
+	winH := float32(Max(0, rect[3]-rect[1]+1))
+	if bg.hasMaskwindow {
+		winW = float32(Max(0, rect[2]-rect[0]))
+		winH = float32(Max(0, rect[3]-rect[1]))
 	}
 
 	// "window" is relative to top-left of screen. "maskwindow" to top-center
-	startrect0 := float32(rect[0]) - pos[0]/stgscl[0]*bg.windowdelta[0] + sys.gameWidth/2/sclx
+	winX := float32(rect[0]) - pos[0]/stgscl[0]*bg.windowdelta[0] + sys.gameWidth/2/sclx
 	if !bg.hasMaskwindow {
-		startrect0 -= sys.gameWidth / 2 / lscl[0]
+		winX -= sys.gameWidth / 2 / lscl[0]
 	}
-
-	startrect0 *= sys.widthScale * wscl[0]
-
+	winX *= sys.widthScale * wscl[0]
 	// Motif x coordinates start from left edge of screen
 	if !isStage && wscl[0] == 1 {
-		startrect0 += float32(sys.gameWidth-320) / 2 * sys.widthScale
+		winX += float32(sys.gameWidth-320) / 2 * sys.widthScale
 	}
 
-	startrect1 := float32(rect[1]) - pos[1]/drawscl/stgscl[1]*bg.windowdelta[1]
+	winY := float32(rect[1]) - pos[1]/drawscl/stgscl[1]*bg.windowdelta[1]
 	if isStage {
+		// The same camera corrections as above, but against the final scly
 		zoff := float32(sys.cam.zoffset) * stglscl
-		startrect1 += (zoff-shakeY)/scly - zoff/stglscl/stgscl[1]
-		startrect1 -= sys.cam.aspectcorrection / scly
-		startrect1 -= (sys.cam.zoomanchorcorrection / scly) * Yzoomdelta
+		winY += (zoff-shakeY)/scly - zoff/stglscl/stgscl[1]
+		winY -= sys.cam.aspectcorrection / scly
+		winY -= (sys.cam.zoomanchorcorrection / scly) * yZoomDelta
 	}
-	startrect1 *= sys.heightScale * wscl[1]
-	startrect1 -= shakeY
+	winY *= sys.heightScale * wscl[1]
+	winY -= shakeY
 
 	// Determine final window
-	rect[0] = int32(math.Floor(float64(startrect0)))
-	rect[1] = int32(math.Floor(float64(startrect1)))
-	rect[2] = int32(math.Floor(float64(startrect0 + (float32(rect[2]) * sys.widthScale * wscl[0]) - float32(rect[0]))))
-	rect[3] = int32(math.Floor(float64(startrect1 + (float32(rect[3]) * sys.heightScale * wscl[1]) - float32(rect[1]))))
+	// Floor the corner first and derive the size from it, so a window never gains or loses a pixel depending on where it is
+	rect[0] = int32(math.Floor(float64(winX)))
+	rect[1] = int32(math.Floor(float64(winY)))
+	rect[2] = int32(math.Floor(float64(winX + (winW * sys.widthScale * wscl[0]) - float32(rect[0]))))
+	rect[3] = int32(math.Floor(float64(winY + (winH * sys.heightScale * wscl[1]) - float32(rect[1]))))
 
-	// Stage BG windows are relative to the fight viewport.
-	// Offset and clip them when composing at full resolution.
+	// Extra considerations for stage windows
 	if isStage {
-		if viewport, ok := sys.fightDrawClip(); ok {
+		// Apply overdraw
+		// Before shifting the windows for the viewport
+		rect = intersectRect(rect, overdrawClip)
+
+		// Stage BG windows are relative to the fight viewport.
+		// Offset and clip them when composing at full resolution.
+		viewport, _ := sys.fightDrawClip()
+		if viewport != sys.scrrect {
 			rect[0] += viewport[0] - sys.scrrect[0]
 			rect[1] += viewport[1] - sys.scrrect[1]
-			rect = intersectRect(rect, viewport)
 		}
+
+		// Intersect viewport
+		rect = intersectRect(rect, viewport)
+	}
+	if applyTransform {
+		window := bg.startrect
+		if !bg.hasMaskwindow {
+			window = NormalizeRect(window)
+			window[2]++
+			window[3]++
+		}
+		rect = transform.window(window, [2]float32{bgscl * lscl[0], bgscl * lscl[1]})
 	}
 
-	// Render background if it's within the screen area
-	if rect[0] < sys.scrrect[2] && rect[1] < sys.scrrect[3] && rect[0]+rect[2] > 0 && rect[1]+rect[3] > 0 {
-		if bg._type == BG_Video {
-			if bg.video == nil {
-				return
-			}
+	// Nothing to draw if the window is off screen
+	if rect[0] >= sys.scrrect[2] || rect[1] >= sys.scrrect[3] ||
+		rect[0]+rect[2] <= 0 || rect[1]+rect[3] <= 0 {
+		return
+	}
+
+	// Point the animation at the current video frame
+	if bg._type == BG_Video {
+		if bg.video == nil {
+			return
+		}
+		if transform == nil || !sys.matchPaused() {
 			bg.video.Tick()
-			if bg.video.texture == nil {
-				return
-			}
-
-			bg.anim.isVideo = true
-			bg.anim.spr = newSprite()
-			bg.anim.spr.Tex = bg.video.texture
-
-			w := float32(bg.video.texture.GetWidth())
-			h := float32(bg.video.texture.GetHeight())
-			//if bg.video.scaleMode != SM_None {
-			//	w /= sys.widthScale
-			//	h /= sys.heightScale
-			//}
-			bg.anim.spr.Size = [2]uint16{
-				uint16(math.Ceil(float64(w))),
-				uint16(math.Ceil(float64(h))),
-			}
-
-			bg.anim.scale_x = 1
-			bg.anim.scale_y = 1
-
 		}
-
-		// Xshear offset correction
-		xsoffset := -bg.xshear * Sign(bg.scalestart[1]) * (float32(bg.anim.spr.Offset[1]) * scly)
-
-		if bg.rot.angle != 0 {
-			xsoffset /= bg.rot.angle
+		if bg.video.texture == nil {
+			return
 		}
+		bg.anim.isVideo = true
+		bg.anim.spr = newSprite()
+		bg.anim.spr.Tex = bg.video.texture
 
-		// Choose render origin: top-left for motif/storyboard videos, center for everything else
-		var rcx float32
-		if bg._type != BG_Video || isStage {
-			rcx = sys.gameWidth / 2
+		w := float32(bg.video.texture.GetWidth())
+		h := float32(bg.video.texture.GetHeight())
+		//if bg.video.scaleMode != SM_None {
+		//	w /= sys.widthScale
+		//	h /= sys.heightScale
+		//}
+		bg.anim.spr.Size = [2]uint16{
+			uint16(math.Ceil(float64(w))),
+			uint16(math.Ceil(float64(h))),
 		}
-
-		bg.anim.Draw(&rect, x-xsoffset, y, sclx, scly,
-			bg.xscale[0]*bgscl*(scalestartX+xs)*xs3,
-			xbs*bgscl*(scalestartX+xs)*xs3,
-			ys*ys3, xras*x/(Abs(ys*ys3)*lscl[1]*float32(bg.anim.spr.Size[1])*bg.scalestart[1])*sclx_recip*bg.scalestart[1]-bg.xshear,
-			bg.rot, rcx, bg.palfx, 1, [2]float32{1, 1}, int32(bg.projection), bg.fLength, 0, false, CustomShaderRenderData{})
+		bg.anim.scale_x = 1
+		bg.anim.scale_y = 1
 	}
+
+	// Xshear offset correction
+	xsoffset := -bg.xshear * Sign(bg.scalestart[1]) * (float32(bg.anim.spr.Offset[1]) * scly)
+	if bg.rot.angle != 0 {
+		xsoffset /= bg.rot.angle
+	}
+
+	// Choose render origin: top-left for motif/storyboard videos, center for everything else
+	var rcx float32
+	if bg._type != BG_Video || isStage {
+		rcx = sys.gameWidth / 2
+	}
+	drawX, drawY, facing := x-xsoffset, y, float32(1)
+	if applyTransform {
+		rcx = 0
+		sclx *= transform.scale[0]
+		scly *= transform.scale[1]
+		if sclx == 0 || scly == 0 {
+			return
+		}
+		drawX += transform.offset[0] / sclx
+		drawY += transform.offset[1] / scly
+		facing = Sign(transform.scale[0])
+		bg.rot.angle *= facing
+		bg.rot.yangle *= facing
+	}
+
+	stackedPfx := bg.palfx.withStacked(sys.bgPalFX, bg.anim.transType,
+		[2]int32{int32(bg.anim.srcAlpha), int32(bg.anim.dstAlpha)})
+
+	// Parallax rastering is expressed as a shear, on top of the BG's own xshear
+	xShear := xras*x/(Abs(ys*ys3)*lscl[1]*float32(bg.anim.spr.Size[1])*bg.scalestart[1])*
+		xRecip*bg.scalestart[1] - bg.xshear
+
+	bg.anim.Draw(&rect, drawX, drawY, sclx, scly,
+		bg.xscale[0]*bgscl*(scalestartX+xs)*xs3,
+		xbs*bgscl*(scalestartX+xs)*xs3,
+		ys*ys3, xShear,
+		bg.rot, rcx, [2]float32{0, 0}, stackedPfx, facing, [2]float32{1, 1},
+		int32(bg.projection), bg.fLength, false, CustomShaderRenderData{})
 }
 
 type bgCtrl struct {
@@ -965,7 +1022,7 @@ type Stage struct {
 	bgmState        BGMState
 	bgmratio        float32
 	bgmtrigger      int32
-	constants       map[string]float32
+	constants       map[string]TypedValue
 	partnerspacing  int32
 	ikemenver       [3]uint16
 	mugenver        [2]uint16
@@ -992,7 +1049,7 @@ func newStage(def string) *Stage {
 		music:          make(Music),
 		bgmratio:       0.3,
 		bgmtrigger:     0,
-		constants:      make(map[string]float32),
+		constants:      make(map[string]TypedValue),
 		partnerspacing: 25,
 	}
 	s.sdw.intensity = 128
@@ -1019,8 +1076,8 @@ func loadStage(def string, maindef bool) (*Stage, error) {
 	s.sff = &Sff{}
 
 	lines, i := SplitAndTrim(str, "\n"), 0
-	s.animTable = ReadAnimationTable(def, s.sff, &s.sff.palList, lines, &i, true)
-	i = 0
+	s.animTable = ReadAnimationTable(def, s.sff, &s.sff.palList, str, true)
+
 	defmap := make(map[string][]IniSection)
 	for i < len(lines) {
 		is, name, _ := ReadIniSection(lines, &i)
@@ -1153,8 +1210,8 @@ func loadStage(def string, maindef bool) (*Stage, error) {
 
 	// Constants group
 	if sec, _ := getSection("constants"); sec != nil {
-		for key, value := range sec {
-			s.constants[key] = float32(Atof(value))
+		if err := sec.ReadAutoTypeMap(s.constants, "constant"); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1209,11 +1266,15 @@ func loadStage(def string, maindef bool) (*Stage, error) {
 		sec.ReadI32("boundright", &s.stageCamera.boundright)
 		sec.ReadI32("boundhigh", &s.stageCamera.boundhigh)
 		sec.ReadI32("boundlow", &s.stageCamera.boundlow)
+		sec.ReadI32("zboundtop", &s.stageCamera.zboundtop)
+		sec.ReadI32("zboundbot", &s.stageCamera.zboundbot)
 		sec.ReadF32("verticalfollow", &s.stageCamera.verticalfollow)
 		sec.ReadI32("floortension", &s.stageCamera.floortension)
 		sec.ReadI32("tension", &s.stageCamera.tension)
+		sec.ReadI32("ztension", &s.stageCamera.ztension)
 		sec.ReadF32("tensionvel", &s.stageCamera.tensionvel)
-		sec.ReadI32("overdrawhigh", &s.stageCamera.overdrawhigh) // TODO: not implemented
+		sec.ReadF32("ztensionvel", &s.stageCamera.ztensionvel)
+		sec.ReadI32("overdrawhigh", &s.stageCamera.overdrawhigh)
 		sec.ReadI32("overdrawlow", &s.stageCamera.overdrawlow)
 		sec.ReadI32("cuthigh", &s.stageCamera.cuthigh)
 		sec.ReadI32("cutlow", &s.stageCamera.cutlow)
@@ -1223,6 +1284,7 @@ func loadStage(def string, maindef bool) (*Stage, error) {
 		sec.ReadF32("near", &s.stageCamera.near)
 		sec.ReadF32("far", &s.stageCamera.far)
 		sec.ReadBool("autocenter", &s.stageCamera.autocenter)
+		sec.ReadBool("zautocenter", &s.stageCamera.zautocenter)
 		sec.ReadF32("yscrollspeed", &s.stageCamera.yscrollspeed)
 		sec.ReadF32("verticalfollowzoomdelta", &s.stageCamera.verticalfollowzoomdelta)
 		sec.ReadBool("lowestcap", &s.stageCamera.lowestcap)
@@ -1387,13 +1449,14 @@ func loadStage(def string, maindef bool) (*Stage, error) {
 			s.sdw.intensity = Clamp(tmp, 0, 255)
 		}
 		var r, g, b int32
-		sec.readI32ForStage("color", &r, &g, &b)
-		r, g, b = Clamp(r, 0, 255), Clamp(g, 0, 255), Clamp(b, 0, 255)
+		if sec.readI32ForStage("color", &r, &g, &b) {
+			r, g, b = Clamp(r, 0, 255), Clamp(g, 0, 255), Clamp(b, 0, 255)
+			s.sdw.color = uint32(r<<16 | g<<8 | b)
+		}
 		// Disable color parameter specifically in Mugen 1.1 stages
 		if s.ikemenver[0] == 0 && s.ikemenver[1] == 0 && s.mugenver[0] == 1 && s.mugenver[1] == 1 {
-			r, g, b = 0, 0, 0
+			s.sdw.color = 0
 		}
-		s.sdw.color = uint32(r<<16 | g<<8 | b)
 		sec.ReadF32("xscale", &s.sdw.xscale)
 		sec.ReadF32("yscale", &s.sdw.yscale)
 		sec.readI32ForStage("fade.range", &s.sdw.fadeend, &s.sdw.fadebgn)
@@ -1424,16 +1487,16 @@ func loadStage(def string, maindef bool) (*Stage, error) {
 
 	// Reflection group
 	if sec, _ := getSection("reflection"); sec != nil {
-		s.reflection.color = 0xFFFFFF
 		var tmp int32
 		//sec.ReadBool("reflect", &reflect) // This parameter is documented in Mugen but doesn't do anything
 		if sec.ReadI32("intensity", &tmp) {
 			s.reflection.intensity = Clamp(tmp, 0, 255)
 		}
-		var r, g, b int32 = 0, 0, 0
-		sec.readI32ForStage("color", &r, &g, &b)
-		r, g, b = Clamp(r, 0, 255), Clamp(g, 0, 255), Clamp(b, 0, 255)
-		s.reflection.color = uint32(r<<16 | g<<8 | b)
+		var r, g, b int32
+		if sec.readI32ForStage("color", &r, &g, &b) {
+			r, g, b = Clamp(r, 0, 255), Clamp(g, 0, 255), Clamp(b, 0, 255)
+			s.reflection.color = uint32(r<<16 | g<<8 | b)
+		}
 		if sec.ReadI32("layerno", &tmp) {
 			s.reflection.layerno = Clamp(tmp, -1, 0)
 		}
@@ -1557,6 +1620,7 @@ func loadStage(def string, maindef bool) (*Stage, error) {
 			s.bgc = append(s.bgc, *bgc)
 		}
 	}
+
 	link, zlink := 0, -1
 	for i, b := range s.bg {
 		if b.positionlink && i > 0 {
@@ -1818,7 +1882,7 @@ func (s *Stage) action() {
 		s.bga.action(true)
 
 		if s.model != nil {
-			s.model.step(sys.turbo)
+			s.model.step()
 		}
 	}
 
@@ -1864,50 +1928,20 @@ func (s *Stage) action() {
 // Currently this function only exists so that the stage update sequence is similar to others. In the future it could run more tasks
 // Doing this allows characters to see "stageTime = 0"
 func (s *Stage) tick() {
+	if s.paused() {
+		return
+	}
 
 	// Update BG elements
+	// These are from the stage BG's own PalFX, so we'll make them respect stage pause
 	for _, b := range s.bg {
 		b.palfx.step()
-
-		// BGPalFX can step even if the stage is paused
-		if sys.bgPalFX.enable {
-			// TODO: Finish proper synthesization of bgPalFX into PalFX from bg element
-			// (Right now, bgPalFX just overrides all unique parameters from BG Elements' PalFX)
-			// for j := 0; j < 3; j++ {
-			// if sys.bgPalFX.invertall {
-			// b.palfx.eAdd[j] = -b.palfx.add[j] * (b.palfx.mul[j]/256) + 256 * (1-(b.palfx.mul[j]/256))
-			// b.palfx.eMul[j] = 256
-			// }
-			// b.palfx.eAdd[j] = int32((float32(b.palfx.eAdd[j])) * sys.bgPalFX.eColor)
-			// b.palfx.eMul[j] = int32(float32(b.palfx.eMul[j]) * sys.bgPalFX.eColor + 256*(1-sys.bgPalFX.eColor))
-			// }
-			// b.palfx.synthesize(sys.bgPalFX)
-			b.palfx.eAdd = sys.bgPalFX.eAdd
-			b.palfx.eMul = sys.bgPalFX.eMul
-			b.palfx.eColor = sys.bgPalFX.eColor
-			b.palfx.eHue = sys.bgPalFX.eHue
-			b.palfx.eInvertall = sys.bgPalFX.eInvertall
-			b.palfx.eInvertblend = sys.bgPalFX.eInvertblend
-			b.palfx.eAllowNeg = sys.bgPalFX.eAllowNeg
-		}
 	}
 
 	// Update model PalFX
+	// This seems to be unused right now. But it can still stack with BGPalFX later
 	if s.model != nil {
 		s.model.pfx.step()
-		if sys.bgPalFX.enable {
-			s.model.pfx.eAdd = sys.bgPalFX.eAdd
-			s.model.pfx.eMul = sys.bgPalFX.eMul
-			s.model.pfx.eColor = sys.bgPalFX.eColor
-			s.model.pfx.eHue = sys.bgPalFX.eHue
-			s.model.pfx.eInvertall = sys.bgPalFX.eInvertall
-			s.model.pfx.eInvertblend = sys.bgPalFX.eInvertblend
-			s.model.pfx.eAllowNeg = sys.bgPalFX.eAllowNeg
-		}
-	}
-
-	if s.paused() {
-		return
 	}
 
 	// Stage time must be incremented after updating BGCtrl's
@@ -1920,9 +1954,13 @@ func (s *Stage) draw(layer int32, x, y, scl float32) {
 	if s.hires {
 		bgscl = 0.5
 	}
-	ofs := sys.envShake.getOffset()
-	pos := [...]float32{x, y}
+	shake := sys.envShake.getOffset()
+	pos := [2]float32{x, y}
 	scl2 := s.localscl * scl
+
+	// Add shake to render position
+	pos[0] += shake[0] / scl2
+
 	// This code makes the background scroll faster when surpassing boundhigh with the camera pushed down
 	// through floortension and boundlow. MUGEN 1.1 doesn't look like it does this, so it was commented.
 	// var extraBoundH float32
@@ -1934,30 +1972,33 @@ func (s *Stage) draw(layer int32, x, y, scl float32) {
 	// extraBoundH*scl
 	// pos[1] = float32(s.stageCamera.boundhigh) - extraBoundH/s.localscl
 	// }
-	if ofs[1] != 0 && s.stageCamera.verticalfollow > 0 {
-		if ofs[1] < 0 {
-			tmp := (float32(s.stageCamera.boundhigh) - pos[1]) * scl2
-			if scl > 1 {
-				tmp += (sys.cam.GroundLevel() + float32(sys.gameHeight-240)) * (1/scl - 1)
+
+	// This whole block seems to have been compensating for the missing overdraw feature
+	/*
+		if ofs[1] != 0 && s.stageCamera.verticalfollow > 0 {
+			if ofs[1] < 0 {
+				tmp := (float32(s.stageCamera.boundhigh) - pos[1]) * scl2
+				if scl > 1 {
+					tmp += (sys.cam.GroundLevel() + float32(sys.gameHeight-240)) * (1/scl - 1)
+				} else {
+					tmp += float32(sys.gameHeight) * (1/scl - 1)
+				}
+				if tmp >= 0 {
+				} else if ofs[1] < tmp {
+					ofs[1] -= tmp
+					pos[1] += tmp / scl2
+				} else {
+					pos[1] += ofs[1] / scl2
+					ofs[1] = 0
+				}
 			} else {
-				tmp += float32(sys.gameHeight) * (1/scl - 1)
-			}
-			if tmp >= 0 {
-			} else if ofs[1] < tmp {
-				ofs[1] -= tmp
-				pos[1] += tmp / scl2
-			} else {
-				pos[1] += ofs[1] / scl2
-				ofs[1] = 0
-			}
-		} else {
-			if -ofs[1] >= pos[1]*scl2 {
-				pos[1] += ofs[1] / scl2
-				ofs[1] = 0
+				if -ofs[1] >= pos[1]*scl2 {
+					pos[1] += ofs[1] / scl2
+					ofs[1] = 0
+				}
 			}
 		}
-	}
-	pos[0] += ofs[0] / scl2
+	*/
 
 	// Mugen doesn't seem to do this sort of snapping
 	// Perhaps this was trying to emulate Winmugen's low resolution
@@ -1968,12 +2009,29 @@ func (s *Stage) draw(layer int32, x, y, scl float32) {
 	//	}
 	//}
 
-	s.drawModel(pos, ofs[1], scl, layer)
+	// Compute overdraw clipping
+	// Must run even when overdraw is 0, so that the shake alone can still crop
+	// TODO: This works for EnvShake, which is the main use case
+	// But it hasn't yet been tested for "Overdraw pixels will also be used when the screen aspect is taller than the stage aspect"
+	odh := Max(0, float32(s.stageCamera.overdrawhigh)) * s.localscl
+	odl := Max(0, float32(s.stageCamera.overdrawlow)) * s.localscl
+	topOver := int32(Floor(Max(0, -odh-shake[1]) * sys.heightScale)) // Needs "shake" because the window itself shakes
+	botOver := int32(Ceil(Max(0, -odl+shake[1]) * sys.heightScale))
+	overdrawClip := [4]int32{
+		sys.scrrect[0],
+		sys.scrrect[1] + topOver,
+		sys.scrrect[2],
+		sys.scrrect[3] - topOver - botOver,
+	}
 
+	// Draw model
+	s.drawModel(pos, shake[1], scl, layer)
+
+	// Draw BG's
 	for _, b := range s.bg {
 		// Draw only when visible and enabled.
 		if b.layerno == layer && b.visible && b.enabled && (b.anim.spr != nil || b._type == BG_Video) {
-			b.draw(pos, scl, bgscl, s.localscl, s.scale, ofs[1], true)
+			b.draw(pos, scl, bgscl, s.localscl, s.scale, shake[1], true, overdrawClip)
 		}
 	}
 }

@@ -126,6 +126,23 @@ func Abs[T int | int32 | int64 | float32 | float64](val T) (res T) {
 }
 
 func Pow(x, y float32) float32 {
+	// Fast path for the hottest cases
+	switch y {
+	case 0:
+		return 1
+	case 1:
+		return x
+	case 2:
+		return x * x
+	case 3:
+		p := float64(x)
+		return float32(p * p * p)
+	case 4:
+		p := float64(x)
+		p *= p
+		return float32(p * p)
+	}
+	// General-purpose fallback
 	return float32(math.Pow(float64(x), float64(y)))
 }
 
@@ -181,12 +198,17 @@ func Atoi(str string) int32 {
 		} else {
 			a = str
 		}
+		// Negative side allows one more (-2147483648 is a valid int32)
+		limit := int64(math.MaxInt32)
+		if str[0] == '-' {
+			limit++
+		}
 		for i := range a {
 			if a[i] < '0' || '9' < a[i] {
 				break
 			}
 			n = n*10 + int64(a[i]-'0')
-			if n > 2147483647 {
+			if n > limit {
 				sys.appendToConsole(fmt.Sprintf("WARNING: Atoi conversion outside int32 range: %v", a[:i+1]))
 				LogMessage("Atoi conversion outside int32 range: %v", a[:i+1])
 				if str[0] == '-' {
@@ -266,68 +288,153 @@ func Itoa(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-func RectRotate(x, y, w, h, cx, cy, angle float32) [][2]float32 {
-	rp := make([][2]float32, 4)
-	corners := [][2]float32{
-		{x, y},
-		{x + w, y},
-		{x + w, y + h},
-		{x, y + h},
+func RectRotate(rect [4]float32, pivot [2]float32, angle float32) [4][2]float32 {
+	x1, y1, x2, y2 := rect[0], rect[1], rect[2], rect[3]
+	corners := [4][2]float32{
+		{x1, y1},
+		{x2, y1},
+		{x2, y2},
+		{x1, y2},
 	}
-	for i := 0; i < 4; i++ {
-		p := corners[i]
-		tx := p[0] - cx
-		ty := p[1] - cy
-		newX := Cos(angle)*tx - Sin(angle)*ty + cx
-		newY := Sin(angle)*tx + Cos(angle)*ty + cy
-		rp[i] = [2]float32{newX, newY}
+
+	rad := angle * math.Pi / 180.0
+	s, c := Sin(rad), Cos(rad)
+
+	var rotated [4][2]float32
+	for i, p := range corners {
+		tx := p[0] - pivot[0]
+		ty := p[1] - pivot[1]
+		rotated[i] = [2]float32{
+			c*tx - s*ty + pivot[0],
+			s*tx + c*ty + pivot[1],
+		}
 	}
-	return rp
+	return rotated
 }
 
-// Check if two rotated rectangles intersect.
-func RectIntersect(x1, y1, w1, h1, x2, y2, w2, h2, cx1, cy1, cx2, cy2, angle1, angle2 float32) bool {
-	rect1 := RectRotate(x1, y1, w1, h1, cx1, cy1, angle1)
-	rect2 := RectRotate(x2, y2, w2, h2, cx2, cy2, angle2)
-	projectionRange := func(rect [][2]float32, normal [2]float32) (min float32, max float32) {
+// Checks two rectangles (like Clsn) for intersection
+// TODO: Return overlap in world coordinates ([4]float32) so it can be used for more things
+func RectIntersect(rect1, rect2 [4]float32, angle1, angle2 float32, pivot1, pivot2 [2]float32) (bool, float32, float32) {
+	if angle1 == 0 && angle2 == 0 {
+		return RectIntersectAABB(rect1, rect2)
+	}
+	return RectIntersectSAT(rect1, rect2, pivot1, pivot2, angle1, angle2)
+}
+
+// Fast path for no rotation
+func RectIntersectAABB(rect1, rect2 [4]float32) (bool, float32, float32) {
+	left1, top1, right1, bottom1 := rect1[0], rect1[1], rect1[2], rect1[3]
+	left2, top2, right2, bottom2 := rect2[0], rect2[1], rect2[2], rect2[3]
+
+	// Standard AABB overlap.
+	overlapX := Min(right1, right2) - Max(left1, left2)
+	overlapY := Min(bottom1, bottom2) - Max(top1, top2)
+
+	// Zero-width case
+	// These are still a valid overlap in Mugen. A point can also intersect with a box
+	if overlapX == 0 && (left1 == right1 || left2 == right2) {
+		halfW1 := (right1 - left1) * 0.5
+		halfW2 := (right2 - left2) * 0.5
+		centerX1 := (left1 + right1) * 0.5
+		centerX2 := (left2 + right2) * 0.5
+		overlapX = (halfW1 + halfW2) - Abs(centerX1-centerX2)
+	}
+
+	// Zero‑height case
+	if overlapY == 0 && (top1 == bottom1 || top2 == bottom2) {
+		halfH1 := (bottom1 - top1) * 0.5
+		halfH2 := (bottom2 - top2) * 0.5
+		centerY1 := (top1 + bottom1) * 0.5
+		centerY2 := (top2 + bottom2) * 0.5
+		overlapY = (halfH1 + halfH2) - Abs(centerY1-centerY2)
+	}
+
+	if overlapX >= 0 && overlapY >= 0 {
+		return true, overlapX, overlapY
+	}
+
+	return false, 0, 0
+}
+
+// Slow path for rotated rectangles
+func RectIntersectSAT(rect1, rect2 [4]float32, pivot1, pivot2 [2]float32, angle1, angle2 float32) (bool, float32, float32) {
+	r1 := RectRotate(rect1, pivot1, angle1)
+	r2 := RectRotate(rect2, pivot2, angle2)
+
+	// SAT projection helper
+	projectionRange := func(rect [4][2]float32, nx, ny float32) (min, max float32) {
 		min = math.MaxFloat32
 		max = -math.MaxFloat32
 		for _, p := range rect {
-			projected := normal[0]*p[0] + normal[1]*p[1]
-			if projected < min {
-				min = projected
+			proj := nx*p[0] + ny*p[1]
+			if proj < min {
+				min = proj
 			}
-			if projected > max {
-				max = projected
+			if proj > max {
+				max = proj
 			}
 		}
 		return
 	}
-	for i1 := 0; i1 < len(rect1); i1++ {
-		i2 := (i1 + 1) % len(rect1)
-		p1 := rect1[i1]
-		p2 := rect1[i2]
-		nx := p2[1] - p1[1]
-		ny := p1[0] - p2[0]
-		minA, maxA := projectionRange(rect1, [2]float32{nx, ny})
-		minB, maxB := projectionRange(rect2, [2]float32{nx, ny})
+
+	// Check a single axis
+	checkAxis := func(nx, ny float32) bool {
+		minA, maxA := projectionRange(r1, nx, ny)
+		minB, maxB := projectionRange(r2, nx, ny)
 		if maxA < minB || maxB < minA {
 			return false
 		}
+		return true
 	}
-	for i1 := 0; i1 < len(rect2); i1++ {
-		i2 := (i1 + 1) % len(rect2)
-		p1 := rect2[i1]
-		p2 := rect2[i2]
-		nx := p2[1] - p1[1]
-		ny := p1[0] - p2[0]
-		minA, maxA := projectionRange(rect1, [2]float32{nx, ny})
-		minB, maxB := projectionRange(rect2, [2]float32{nx, ny})
-		if maxA < minB || maxB < minA {
-			return false
+
+	// Check axes of rect1
+	for i := range r1 {
+		p1 := r1[i]
+		p2 := r1[(i+1)%4]
+		if !checkAxis(p2[1]-p1[1], p1[0]-p2[0]) {
+			return false, 0, 0
 		}
 	}
-	return true
+
+	// Check axes of rect2
+	for i := range r2 {
+		p1 := r2[i]
+		p2 := r2[(i+1)%4]
+		if !checkAxis(p2[1]-p1[1], p1[0]-p2[0]) {
+			return false, 0, 0
+		}
+	}
+
+	// If we get here, the rectangles do overlap
+	// Compute AABB of the rotated rectangles
+	getBounds := func(rect [4][2]float32) (minX, maxX, minY, maxY float32) {
+		minX, maxX = math.MaxFloat32, -math.MaxFloat32
+		minY, maxY = math.MaxFloat32, -math.MaxFloat32
+		for _, p := range rect {
+			if p[0] < minX {
+				minX = p[0]
+			}
+			if p[0] > maxX {
+				maxX = p[0]
+			}
+			if p[1] < minY {
+				minY = p[1]
+			}
+			if p[1] > maxY {
+				maxY = p[1]
+			}
+		}
+		return
+	}
+
+	minX1, maxX1, minY1, maxY1 := getBounds(r1)
+	minX2, maxX2, minY2, maxY2 := getBounds(r2)
+
+	// Return overlap as distances. TODO: Return as rectangle
+	overlapX := Min(maxX1, maxX2) - Max(minX1, minX2)
+	overlapY := Min(maxY1, maxY2) - Max(minY1, minY2)
+
+	return true, overlapX, overlapY
 }
 
 // Prevent overflow errors when converting float64 to int32
@@ -1129,6 +1236,72 @@ func (is IniSection) readF32CsvForStage(name string) (ary []float32) {
 	return
 }
 
+// ReadAutoType reads a scalar INI value as a string, int32, or float32.
+// The bool reports whether the key exists; unquoted non-numeric values are invalid.
+func (is IniSection) ReadAutoType(name string) (any, bool, error) {
+	raw, ok := is[name]
+	if !ok {
+		return nil, false, nil
+	}
+
+	// Helper to print shared error
+	invalidValue := func() error {
+		return Error(fmt.Sprintf("%q value must be a quoted string or number", name))
+	}
+
+	// Get raw value
+	s := strings.TrimSpace(raw)
+
+	// Try string
+	if strings.ContainsRune(s, '"') {
+		if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+			return nil, true, invalidValue()
+		}
+		unquoted, err := strconv.Unquote(s)
+		if err != nil {
+			return nil, true, invalidValue()
+		}
+		return unquoted, true, nil
+	}
+
+	// Try int
+	if IsInt(s) {
+		return Atoi(s), true, nil
+	}
+
+	// Try float
+	// Parse like the compiler so a value compares equal to the same CNS literal.
+	if f, err := strconv.ParseFloat(s, 32); err == nil {
+		return float32(f), true, nil
+	}
+
+	// Invalid value
+	return nil, true, invalidValue()
+}
+
+func (is IniSection) ReadAutoTypeMap(dst map[string]TypedValue, kind string) error {
+	for key := range is {
+		value, ok, err := is.ReadAutoType(key)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		switch value := value.(type) {
+		case string:
+			dst[key] = TypedValue{Type: VT_String, Str: value}
+		case int32:
+			dst[key] = TypedValue{Type: VT_Int, Num: float64(value)}
+		case float32:
+			dst[key] = TypedValue{Type: VT_Float, Num: float64(value)}
+		default:
+			return Error(fmt.Sprintf("unsupported auto-typed value for %s key %q", kind, key))
+		}
+	}
+	return nil
+}
+
 func (is IniSection) getText(name string) (str string, ok bool, err error) {
 	str, ok = is[name]
 	if !ok {
@@ -1299,7 +1472,8 @@ func (l *Layout) DrawAnim(r *[4]int32, x, y, scl, xscl, yscl float32, ln int16, 
 		a.Draw(drawwindow, x+l.offset[0]-xsoffset, y+l.offset[1]+float32(sys.gameHeight-240),
 			scl, scl, (l.scale[0]*xscl)*float32(l.facing), (l.scale[0]*xscl)*float32(l.facing),
 			(l.scale[1]*yscl)*float32(l.vfacing), xshear, l.rot,
-			float32(sys.gameWidth-320)/2, palfx, 1, [2]float32{1, 1}, int32(l.projection), l.fLength, 0, false, CustomShaderRenderData{})
+			float32(sys.gameWidth-320)/2, [2]float32{0, 0},
+			palfx, 1, [2]float32{1, 1}, int32(l.projection), l.fLength, false, CustomShaderRenderData{})
 	}
 }
 
@@ -1751,6 +1925,14 @@ func SliceDelete[T any](slice []T, i int) []T {
 	var zero T
 	slice[len(slice)-1] = zero // This only matters for pointers
 	return slice[:len(slice)-1]
+}
+
+// Backport of slices.Grow for Go 1.20
+func SliceGrow[T any](slice []T, n int) []T {
+	if n -= cap(slice) - len(slice); n > 0 {
+		slice = append(slice[:cap(slice)], make([]T, n)...)[:len(slice)]
+	}
+	return slice
 }
 
 // Nils out all elements and returns a zero-length slice while preserving the underlying capacity

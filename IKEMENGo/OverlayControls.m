@@ -1,7 +1,8 @@
 #import "OverlayControls.h"
+#import <SDL2/SDL.h>
 
-// Abstract M.U.G.E.N. input indices (must match iosPlayerKey / the engine).
-// 0..3 directions, 4..9 the six attack buttons, 10 start, 13 menu/escape.
+// On-screen control IDs (UI tags).
+// 0..3 directions, 4..9 the six attack buttons, 10 start, 13 menu.
 #define IKEMEN_ID_UP    0
 #define IKEMEN_ID_DOWN  1
 #define IKEMEN_ID_LEFT  2
@@ -14,6 +15,104 @@
 #define IKEMEN_ID_Z     9
 #define IKEMEN_ID_START 10
 #define IKEMEN_ID_MENU  13
+
+#pragma mark - Virtual SDL game controller
+
+// The engine reads input through SDL's game controller API. We synthesize a
+// virtual controller (6 axes, 15 buttons, 1 hat — same shape as the official
+// ikemen-ios wrapper) and mirror touch state into it via
+// SDL_JoystickSetVirtual{Button,Axis,Hat}.
+static int s_virtualJoystickIndex = -1;
+static SDL_Joystick *s_virtualJoystick = NULL;
+
+// Centralized cardinal state so the POV hat can always be rebuilt correctly.
+static BOOL s_cardinals[4] = { NO, NO, NO, NO };
+static BOOL IKENGetCardinalState(int idx) {
+    if (idx < 0 || idx > 3) return NO;
+    return s_cardinals[idx];
+}
+static void IKENSetCardinalState(int idx, BOOL on) {
+    if (idx < 0 || idx > 3) return;
+    s_cardinals[idx] = on;
+}
+
+static void IKENInitVirtualJoystick(void) {
+    if (s_virtualJoystickIndex >= 0) {
+        return;
+    }
+    if (SDL_WasInit(SDL_INIT_JOYSTICK) == 0) {
+        SDL_InitSubSystem(SDL_INIT_JOYSTICK);
+    }
+    SDL_PumpEvents(); // ensure the virtual device subsystem registers
+    s_virtualJoystickIndex = SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER, 6, 15, 1);
+    if (s_virtualJoystickIndex >= 0) {
+        SDL_PumpEvents();
+        s_virtualJoystick = SDL_JoystickOpen(s_virtualJoystickIndex);
+    }
+}
+
+static void IKENHandleButton(int keyId, BOOL pressed) {
+    IKENInitVirtualJoystick();
+    if (!s_virtualJoystick) {
+        return;
+    }
+
+    SDL_GameControllerButton btn = SDL_CONTROLLER_BUTTON_INVALID;
+    SDL_GameControllerAxis axis = SDL_CONTROLLER_AXIS_INVALID;
+
+    switch (keyId) {
+        case IKEMEN_ID_A:     btn  = SDL_CONTROLLER_BUTTON_A; break;
+        case IKEMEN_ID_B:     btn  = SDL_CONTROLLER_BUTTON_B; break;
+        case IKEMEN_ID_C:     axis = SDL_CONTROLLER_AXIS_TRIGGERRIGHT; break;
+        case IKEMEN_ID_X:     btn  = SDL_CONTROLLER_BUTTON_X; break;
+        case IKEMEN_ID_Y:     btn  = SDL_CONTROLLER_BUTTON_Y; break;
+        case IKEMEN_ID_Z:     btn  = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER; break;
+        case IKEMEN_ID_START: btn  = SDL_CONTROLLER_BUTTON_START; break;
+        case IKEMEN_ID_MENU:  btn  = SDL_CONTROLLER_BUTTON_BACK; break;
+        default: break;
+    }
+
+    if (btn != SDL_CONTROLLER_BUTTON_INVALID) {
+        SDL_JoystickSetVirtualButton(s_virtualJoystick, (int)btn,
+                                     pressed ? SDL_PRESSED : SDL_RELEASED);
+        SDL_JoystickUpdate();
+    } else if (axis != SDL_CONTROLLER_AXIS_INVALID) {
+        SDL_JoystickSetVirtualAxis(s_virtualJoystick, (int)axis, pressed ? 32767 : 0);
+        SDL_JoystickUpdate();
+    }
+}
+
+// idx: 0=up 1=down 2=left 3=right. We mirror each cardinal to both the D-pad
+// buttons and the POV hat, exactly like the official wrapper.
+static void IKENHandleDirection(int idx, BOOL on) {
+    IKENInitVirtualJoystick();
+    if (!s_virtualJoystick) {
+        return;
+    }
+
+    SDL_GameControllerButton btn = SDL_CONTROLLER_BUTTON_INVALID;
+    switch (idx) {
+        case IKEMEN_ID_UP:    btn = SDL_CONTROLLER_BUTTON_DPAD_UP; break;
+        case IKEMEN_ID_DOWN:  btn = SDL_CONTROLLER_BUTTON_DPAD_DOWN; break;
+        case IKEMEN_ID_LEFT:  btn = SDL_CONTROLLER_BUTTON_DPAD_LEFT; break;
+        case IKEMEN_ID_RIGHT: btn = SDL_CONTROLLER_BUTTON_DPAD_RIGHT; break;
+        default: return;
+    }
+
+    SDL_JoystickSetVirtualButton(s_virtualJoystick, (int)btn,
+                                 on ? SDL_PRESSED : SDL_RELEASED);
+    // Rebuild the POV hat from the current cardinal state.
+    // (ikemen-ios dispatches the hat as "POV Hat 0", the engine's joystick
+    // reader mapping for the directions.)
+    Uint8 hat = SDL_HAT_CENTERED;
+    if (IKENGetCardinalState(IKEMEN_ID_UP))    hat |= SDL_HAT_UP;
+    if (IKENGetCardinalState(IKEMEN_ID_DOWN))  hat |= SDL_HAT_DOWN;
+    if (IKENGetCardinalState(IKEMEN_ID_LEFT))  hat |= SDL_HAT_LEFT;
+    if (IKENGetCardinalState(IKEMEN_ID_RIGHT)) hat |= SDL_HAT_RIGHT;
+    SDL_JoystickSetVirtualHat(s_virtualJoystick, 0, hat);
+
+    SDL_JoystickUpdate();
+}
 
 #pragma mark - D-Pad
 
@@ -66,9 +165,10 @@
 }
 
 - (void)setCardinal:(int)idx on:(BOOL)on {
+    IKENSetCardinalState(idx, on);
     if (_last[idx] != on) {
         _last[idx] = on;
-        IOSHandleKey(idx, on ? 1 : 0);
+        IKENHandleDirection(idx, on);
     }
 }
 
@@ -292,16 +392,16 @@
 }
 
 - (void)buttonDown:(UIButton *)sender {
-    int id = (int)sender.tag;
-    if ([_btnHeld[@(id)] boolValue]) return;
-    _btnHeld[@(id)] = @YES;
-    IOSHandleKey(id, 1);
+    int keyId = (int)sender.tag;
+    if ([_btnHeld[@(keyId)] boolValue]) return;
+    _btnHeld[@(keyId)] = @YES;
+    IKENHandleButton(keyId, YES);
 }
 
 - (void)buttonUp:(UIButton *)sender {
-    int id = (int)sender.tag;
-    _btnHeld[@(id)] = @NO;
-    IOSHandleKey(id, 0);
+    int keyId = (int)sender.tag;
+    _btnHeld[@(keyId)] = @NO;
+    IKENHandleButton(keyId, NO);
 }
 
 - (void)layoutSubviews {
@@ -340,7 +440,7 @@
 }
 
 // Only capture touches that land on the D-pad or on a button; every other
-// touch passes through to the SDL view beneath.
+// touch passes through.
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     if (CGRectContainsPoint(_dPad.frame, point)) {
         return YES;
@@ -354,24 +454,3 @@
 }
 
 @end
-
-#pragma mark - Install
-
-// Installed by the Go engine after SDL creates its window. Marshals to the
-// main thread and drops the overlay on top of the SDL UIKit window.
-void IOSInstallOverlay(void *uiWindow) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *win = (__bridge UIWindow *)uiWindow;
-        if (!win) return;
-        static IkemenOverlayView *overlay = nil;
-        if (overlay) {
-            [overlay removeFromSuperview];
-            overlay = nil;
-        }
-        overlay = [[IkemenOverlayView alloc] initWithFrame:win.bounds];
-        overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        overlay.translatesAutoresizingMaskIntoConstraints = YES;
-        [win addSubview:overlay];
-        [win bringSubviewToFront:overlay];
-    });
-}

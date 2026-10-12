@@ -1,7 +1,7 @@
-prefix=/workspaces/ikemen-go-ios/deps/ios-ffmpeg
+prefix=/tmp/opencode/build/stage-ffmpeg2
 exec_prefix=${prefix}
-libdir=/workspaces/ikemen-go-ios/deps/ios-ffmpeg/lib
-includedir=/workspaces/ikemen-go-ios/deps/ios-ffmpeg/include
+libdir=/tmp/opencode/build/stage-ffmpeg2/lib
+includedir=/tmp/opencode/build/stage-ffmpeg2/include
 
 Name: libswresample
 Description: FFmpeg audio resampling library

@@ -62,7 +62,6 @@ func loadBGDef(sff *Sff, model *Model, def string, bgname string, startlayer int
 			defmap[name] = append(defmap[name], is)
 		}
 	}
-	i = 0
 	if sec := defmap["info"]; len(sec) > 0 {
 		sec[0].readI32ForStage("localcoord", &s.localcoord[0], &s.localcoord[1])
 	}
@@ -90,7 +89,7 @@ func loadBGDef(sff *Sff, model *Model, def string, bgname string, startlayer int
 
 	s.sff = sff
 	s.model = model
-	s.animTable = ReadAnimationTable(def, s.sff, &s.sff.palList, lines, &i, true)
+	s.animTable = ReadAnimationTable(def, s.sff, &s.sff.palList, str, true)
 
 	var bglink *backGround
 	for _, bgsec := range defmap[bgname] {
@@ -312,7 +311,7 @@ func (s *BGDef) action() {
 
 	s.bga.action(true)
 	if s.model != nil {
-		s.model.step(1)
+		s.model.step()
 	}
 
 	// Global time must be incremented after updating BGCtrl
@@ -346,8 +345,44 @@ func (s *BGDef) step() {
 }
 
 func (s *BGDef) Draw(layer int32, x, y, scl float32) {
+	s.draw(layer, x, y, scl, nil)
+}
+
+// An optional outer transform places a complete 2D background at a match origin.
+type bgDrawTransform struct {
+	space  Space
+	offset [2]float32
+	scale  [2]float32
+}
+
+func (t *bgDrawTransform) window(window [4]int32, localScl [2]float32) [4]int32 {
+	clip, _ := sys.fightDrawClip()
+	if window == [4]int32{} {
+		return clip
+	}
+	var corners [4]float32
+	for i := range corners {
+		axis := i % 2
+		corners[i] = float32(window[i])*localScl[axis]*t.scale[axis] + t.offset[axis]
+	}
+	x1, x2 := Min(corners[0], corners[2]), Max(corners[0], corners[2])
+	y1, y2 := Min(corners[1], corners[3]), Max(corners[1], corners[3])
+	x := x1 * sys.widthScale
+	y := y1 * sys.heightScale
+	return intersectRect([4]int32{
+		int32(x), int32(y),
+		int32((x2-x1)*sys.widthScale + 0.5),
+		int32((y2-y1)*sys.heightScale + 0.5),
+	}, clip)
+}
+
+func (s *BGDef) draw(layer int32, x, y, scl float32, transform *bgDrawTransform) {
 	// Drawing is allowed at video rate, while BG state advances at UI rate.
-	s.step()
+	// In-match storyboards advance explicitly, including their pause handling.
+	if transform == nil {
+		s.step()
+	}
+
 	if s.model != nil && s.sceneNumber >= 0 {
 		drawFOV := s.fov * math.Pi / 180
 		outlineConst := float32(0.003 * math.Tan(float64(drawFOV)))
@@ -359,10 +394,16 @@ func (s *BGDef) Draw(layer int32, x, y, scl float32) {
 		view = view.Mul4(mgl.Scale3D(s.modelScale[0], s.modelScale[1], s.modelScale[2]))
 		s.model.draw(1, int(s.sceneNumber), int(layer), 0, s.modelOffset, proj, view, proj.Mul4(view), outlineConst)
 	}
-	//x, y = x/s.localscl, y/s.localscl
+
+	pos := [2]float32{x, y}
 	for _, b := range s.bg {
 		if b.layerno == layer && b.visible && b.enabled && (b.anim.spr != nil || b._type == BG_Video) {
-			b.draw([...]float32{x, y}, scl, s.localscl, 1, s.scale, 0, false)
+			if transform != nil && transform.space != Space_none {
+				// Camera movement belongs to the whole instance, not individual BG deltas.
+				b.drawTransformed([2]float32{}, 1, 2*sys.cam.halfWidth/float32(s.localcoord[0]), 1, s.scale, 0, false, [4]int32{}, transform)
+			} else {
+				b.drawTransformed(pos, scl, s.localscl, 1, s.scale, 0, false, [4]int32{}, transform)
+			}
 		}
 	}
 }

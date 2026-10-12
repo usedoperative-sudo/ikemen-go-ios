@@ -8,13 +8,11 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "SDL.h"
+#include "AppDelegate.h"
 
-extern int SDL_main(int argc, char *argv[]);
-extern int SDL_UIKitRunApp(int argc, char *argv[], SDL_main_func mainFunction);
-
-// The SDKs these toolchains ship may omit ___isOSVersionAtLeast from
-// libSystem.tbd. SDL links against it, so provide a runtime implementation.
+// The SDKs these toolchains ship may omit ___isOSVersionAtLeast and
+// ___isPlatformVersionAtLeast from libSystem.tbd. SDL and MoltenVK link
+// against them, so provide runtime implementations.
 int __isOSVersionAtLeast(unsigned major, unsigned minor, unsigned patch) {
 	NSOperatingSystemVersion v = [[NSProcessInfo processInfo] operatingSystemVersion];
 	if (v.majorVersion != (NSInteger)major) {
@@ -26,31 +24,31 @@ int __isOSVersionAtLeast(unsigned major, unsigned minor, unsigned patch) {
 	return v.patchVersion >= (NSInteger)patch;
 }
 
-// The engine chdir's into the SDL pref dir and reads data/ from there. We
-// place the base dir in the app's Documents/ikemen-go/IkemenGo so it's
-// visible in the iOS Files app / file sharing (handy for adding custom
-// stages, chars, and data). We export its path to Go via IKEMEN_BASE_DIR.
-// On first launch we seed that directory from the bundled "engine" folder.
-static void seedEngineData(void) {
+int __isPlatformVersionAtLeast(unsigned major, unsigned minor, unsigned patch) {
+	return __isOSVersionAtLeast(major, minor, patch);
+}
+
+// The game base dir lives in the app's Documents/ikemen-go/IkemenGo so it's
+// visible in the iOS Files app / file sharing (handy for adding custom stages,
+// chars, and data). The engine receives it as the --assets argv argument.
+NSString *IKEMENDefaultBaseDir(void) {
 	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
 	if ([paths count] == 0) {
+		return nil;
+	}
+	return [[paths objectAtIndex:0] stringByAppendingPathComponent:@"ikemen-go/IkemenGo"];
+}
+
+// On first launch, seed the base dir from the bundled engine data (the
+// "data", "external", and "font" folders carried in the app bundle via
+// XXX_RESOURCE_DIRS in the Makefile). Idempotent: existing folders are kept.
+static void seedEngineData(void) {
+	NSString *base = IKEMENDefaultBaseDir();
+	if (!base) {
 		return;
 	}
-	NSString *base = [[paths objectAtIndex:0]
-		stringByAppendingPathComponent:@"ikemen-go/IkemenGo"];
-
-	// Tell the Go engine where the game lives.
-	setenv("IKEMEN_BASE_DIR", [base UTF8String], 1);
-
-	NSString *srcRoot = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"engine"];
-	NSString *marker = [base stringByAppendingPathComponent:@"data"];
 
 	NSFileManager *fm = [NSFileManager defaultManager];
-	if ([fm fileExistsAtPath:marker]) {
-		NSLog(@"IKEMEN: engine data already present in %@", base);
-		return; // already seeded
-	}
-
 	NSError *err = nil;
 	[fm createDirectoryAtPath:base withIntermediateDirectories:YES attributes:nil error:&err];
 	if (err) {
@@ -58,17 +56,12 @@ static void seedEngineData(void) {
 		return;
 	}
 
-	NSArray *entries = [fm contentsOfDirectoryAtPath:srcRoot error:&err];
-	if (err || !entries) {
-		NSLog(@"IKEMEN: bundle engine dir not found at %@ (%@)", srcRoot, err);
-		return;
-	}
-
+	NSArray *entries = @[ @"data", @"external", @"font" ];
 	for (NSString *entry in entries) {
-		NSString *src = [srcRoot stringByAppendingPathComponent:entry];
+		NSString *src = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:entry];
 		NSString *dst = [base stringByAppendingPathComponent:entry];
 		if ([fm fileExistsAtPath:dst]) {
-			continue;
+			continue; // already seeded
 		}
 		NSError *copyErr = nil;
 		if (![fm copyItemAtPath:src toPath:dst error:&copyErr]) {
@@ -76,20 +69,6 @@ static void seedEngineData(void) {
 		}
 	}
 	NSLog(@"IKEMEN: engine data seeded into %@", base);
-}
-
-// Returns the game base directory (Documents/ikemen-go/IkemenGo) as a
-// malloc'd C string. The Go engine reads this directly (instead of trusting
-// an env var, which Go's runtime may not observe if set after Go init) and is
-// responsible for freeing it with free(). Returns NULL if unavailable.
-const char *IOSGameBaseDir(void) {
-	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-	if ([paths count] == 0) {
-		return NULL;
-	}
-	NSString *base = [[paths objectAtIndex:0]
-		stringByAppendingPathComponent:@"ikemen-go/IkemenGo"];
-	return strdup([base UTF8String]);
 }
 
 // Crash log directory, resolved once at startup so the signal handler can use
@@ -138,10 +117,9 @@ static void IKNativeCrashHandler(int sig, siginfo_t *info, void *uctx) {
 static void IKNativeCrashInit(void) {
 	// Resolve the Documents base dir once (normal context, Foundation is
 	// safe here) and keep only the plain path for the signal handler.
-	const char *base = IOSGameBaseDir();
+	NSString *base = IKEMENDefaultBaseDir();
 	if (base) {
-		snprintf(g_nativeCrashDir, sizeof(g_nativeCrashDir), "%s", base);
-		free((void *)base);
+		snprintf(g_nativeCrashDir, sizeof(g_nativeCrashDir), "%s", [base UTF8String]);
 	} else {
 		strncpy(g_nativeCrashDir, ".", sizeof(g_nativeCrashDir) - 1);
 	}
@@ -160,8 +138,8 @@ static void IKNativeCrashInit(void) {
 
 int main(int argc, char *argv[]) {
 	@autoreleasepool {
-		seedEngineData();
 		IKNativeCrashInit();
-		return SDL_UIKitRunApp(argc, argv, SDL_main);
+		seedEngineData();
+		return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class]));
 	}
 }

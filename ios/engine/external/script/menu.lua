@@ -242,12 +242,11 @@ menu.t_itemname = {
 	--Character Change
 	['characterchange'] = function(t, item, cursorPosY, moveTxt, sec)
 		if getInput(-1, sec.menu.done.key) then
-			sndPlay(motif.Snd, sec.cursor.done.snd[1], sec.cursor.done.snd[2])
+			sndPlay(motif.Snd, sec.cursor.done.snd[1], sec.cursor.done.snd[2], 100, 0, 0, 0, 0, true)
 			--togglePause(false)
 			endMatch()
 			start.characterchange = true
 			main.pauseMenuActive = false
-			start.f_selectReset(false)
 			return false
 		end
 		return true
@@ -255,7 +254,7 @@ menu.t_itemname = {
 	--Exit
 	['exit'] = function(t, item, cursorPosY, moveTxt, sec)
 		if getInput(-1, sec.menu.done.key) then
-			sndPlay(motif.Snd, sec.cursor.done.snd[1], sec.cursor.done.snd[2])
+			sndPlay(motif.Snd, sec.cursor.done.snd[1], sec.cursor.done.snd[2], 100, 0, 0, 0, 0, true)
 			--togglePause(false)
 			endMatch()
 			start.exit = true
@@ -553,6 +552,18 @@ function menu.f_trainingReset()
 	player(2)
 	setAILevel(0)
 end
+
+hook.add('loop#training', 'trainingSettings', function()
+	if not roundStart() then return end
+	player(2)
+	setAILevel(menu.dummycontrol == 2 and menu.ailevel or 0)
+	mapSet('_iksys_trainingDummyControl', menu.dummycontrol - 1)
+	mapSet('_iksys_trainingDummyMode', menu.dummymode - 1)
+	mapSet('_iksys_trainingGuardMode', menu.guardmode - 1)
+	mapSet('_iksys_trainingFallRecovery', menu.fallrecovery - 1)
+	mapSet('_iksys_trainingDistance', menu.distance - 1)
+	mapSet('_iksys_trainingButtonJam', menu.buttonjam - 1)
+end)
 
 menu.movelistChar = 1
 function menu.f_init()
@@ -909,7 +920,11 @@ function menu.f_commandlistRender(sec, t)
 				--render text
 				else
 					textImgReset(sec.movelist.text.TextSpriteData)
-					textImgSetAlign(sec.movelist.text.TextSpriteData, v.align)
+					local align = v.align
+					if align == 0 and lengthOffset ~= 0 then
+						align = 1
+					end
+					textImgSetAlign(sec.movelist.text.TextSpriteData, align)
 					textImgSetColor(
 						sec.movelist.text.TextSpriteData,
 						v.col.r or sec.movelist.text.font[4],
@@ -928,7 +943,7 @@ function menu.f_commandlistRender(sec, t)
 						width = textImgGetTextWidth(sec.movelist.text.TextSpriteData, v.text) * sec.movelist.text.scale[1] + sec.movelist.text.spacing[1]
 					end
 				end
-				if v.align == 0 then
+				if v.align == 0 and not v.glyph and lengthOffset == 0 then
 					lengthOffset = lengthOffset + width / 2
 				elseif v.align == -1 then
 					lengthOffset = lengthOffset - width

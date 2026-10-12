@@ -74,6 +74,7 @@ BUILDDIR="build"
 DELAYLIB_DIR="$BUILDDIR/delaylib"
 FFMPEG_SRCDIR="$BUILDDIR/ffmpeg-src"
 LIBVPX_SRCDIR="$BUILDDIR/libvpx-src"
+SDL2_SRCDIR="$BUILDDIR/sdl2-src"
 
 # Screenpack assets
 SCREENPACK_REPO="${SCREENPACK_REPO:-https://github.com/ikemen-engine/Ikemen-GO-Screenpack.git}"
@@ -88,6 +89,21 @@ ANDROID_APK_REF="${ANDROID_APK_REF:-main}"
 ANDROID_APK_DIR="$REPO_ROOT/$BUILDDIR/android-apk/ikemen-droid"
 ANDROID_APK_OUT="${ANDROID_APK_OUT:-$REPO_ROOT/bin/ikemen-go.apk}"
 
+# iOS IPA packaging (ikemen-ios)
+BUILD_IOS_IPA="${BUILD_IOS_IPA:-1}"  # 1=yes, 0=no
+# IOS_WRAPPER_DIR: an existing ikemen-ios checkout, used in place (for opening it in Xcode).
+# If unset, IOS_APP_REPO@IOS_APP_REF is freshly cloned into build/ios-app/ikemen-ios.
+IOS_APP_REPO="${IOS_APP_REPO:-https://github.com/Jesuszilla/ikemen-ios.git}"
+IOS_APP_REF="${IOS_APP_REF:-main}"
+IOS_WRAPPER_DIR="${IOS_WRAPPER_DIR:-}"
+IOS_MIN_VERSION="${IOS_MIN_VERSION:-17.0}"
+IOS_IPA_OUT="${IOS_IPA_OUT:-$REPO_ROOT/bin/ikemen-go.ipa}"
+# CFBundleShortVersionString / CFBundleVersion of the app. Apple requires up to three
+# dot-separated integers, so vX.Y.Z tags map to X.Y.Z; other builds keep the wrapper's value.
+IOS_APP_VERSION="${IOS_APP_VERSION:-}"
+IOS_BUILD_NUMBER="${IOS_BUILD_NUMBER:-}"
+MOLTENVK_REV="${MOLTENVK_REV:-v1.4.2}"
+
 # FFmpeg config
 FFMPEG_REV="${FFMPEG_REV:-release/7.1}"
 # Always default to build/ffmpeg under the repo root (absolute path).
@@ -96,6 +112,12 @@ BUILD_FFMPEG="${BUILD_FFMPEG:-auto}"   # auto|yes|no
 LIBVPX_REV="${LIBVPX_REV:-v1.15.2}"
 LIBVPX_PREFIX="${LIBVPX_PREFIX:-$FFMPEG_PREFIX}"
 FFMPEG_REBUILT=0
+
+# SDL2 config. Defaults to "no": only release builds need it, to avoid pinning the
+# archive to the runner's glibc. Local builds should use system SDL2.
+SDL2_REV="${SDL2_REV:-release-2.32.10}"
+SDL2_PREFIX="${SDL2_PREFIX:-$REPO_ROOT/$BUILDDIR/sdl2}"
+BUILD_SDL2="${BUILD_SDL2:-no}"   # yes|no
 
 # ---- App metadata (overridden by CI)
 APP_VERSION="${APP_VERSION:-nightly}"
@@ -212,7 +234,8 @@ check_deps() {
 			if ((${#missing[@]})); then
 				echo "ERROR: Missing tools: ${missing[*]}" >&2
 				echo "Install (Debian/Ubuntu):" >&2
-				echo "  sudo apt update && sudo apt install -y golang-go git pkg-config make nasm yasm build-essential libxmp-dev libsdl2-dev" >&2
+				echo "  sudo apt update && sudo apt install -y git pkg-config make nasm yasm build-essential libxmp-dev libsdl2-dev" >&2
+				echo "Go 1.27+ is required; distro 'golang-go' is usually too old. Get it from https://go.dev/dl/" >&2
 				exit 1
 			fi
 		;;
@@ -220,6 +243,54 @@ check_deps() {
 }
 
 # Ensure SDL2 (via pkg-config) is available
+function build_sdl2() {
+	if [[ -f "$SDL2_PREFIX/lib/pkgconfig/sdl2.pc" ]]; then
+		export PKG_CONFIG_PATH="$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+		return 0
+	fi
+
+	echo "==> Building SDL2 $SDL2_REV to $SDL2_PREFIX"
+	if [[ ! -d "$SDL2_SRCDIR/.git" ]]; then
+		rm -rf "$SDL2_SRCDIR"
+		git clone --depth=1 -b "$SDL2_REV" https://github.com/libsdl-org/SDL.git "$SDL2_SRCDIR"
+	fi
+
+	local build_dir="$SDL2_SRCDIR/build-$GOOS-${GOARCH:-amd64}"
+	rm -rf "$build_dir"
+	cmake -S "$SDL2_SRCDIR" -B "$build_dir" -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX="$SDL2_PREFIX" \
+		-DCMAKE_INSTALL_LIBDIR=lib \
+		-DCMAKE_C_FLAGS="${CFLAGS:-}" \
+		-DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF \
+		-DSDL_X11=ON -DSDL_WAYLAND=ON -DSDL_ALSA=ON -DSDL_PULSEAUDIO=ON \
+		-DSDL_OPENGL=ON -DSDL_OPENGLES=ON -DSDL_VULKAN=ON \
+		-DHAVE_STRLCPY=0 -DHAVE_STRLCAT=0 -DHAVE_WCSLCPY=0 -DHAVE_WCSLCAT=0
+	cmake --build "$build_dir" --parallel
+	cmake --install "$build_dir"
+
+	# Fail loudly rather than shipping an SDL2 with no video/audio backend.
+	local pc="${PKG_CONFIG:-pkg-config}"
+	export PKG_CONFIG_PATH="$SDL2_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+	if ! $pc --exists sdl2; then
+		echo "ERROR: built SDL2 but sdl2.pc is missing in $SDL2_PREFIX" >&2
+		exit 1
+	fi
+	local so
+	so="$(ls "$SDL2_PREFIX"/lib/libSDL2-2.0.so.0.* 2>/dev/null | head -1)"
+	if [[ -z "$so" ]]; then
+		echo "ERROR: built SDL2 but no libSDL2-2.0.so.0.* in $SDL2_PREFIX/lib" >&2
+		exit 1
+	fi
+	for sym in SDL_CreateWindow SDL_OpenAudioDevice SDL_GL_CreateContext; do
+		if ! nm -D --defined-only "$so" 2>/dev/null | grep -q " $sym$"; then
+			echo "ERROR: built SDL2 is missing $sym (a subsystem failed to configure)" >&2
+			exit 1
+		fi
+	done
+	echo "==> SDL2 built: $so"
+}
+
 require_sdl2() {
 	local pc="${PKG_CONFIG:-pkg-config}"
 	if ! $pc --exists sdl2 2>/dev/null; then
@@ -307,8 +378,18 @@ function main() {
 	# Enable CGO.
 	export CGO_ENABLED=1
 
-	# Enable arenas (required for rollback)
-	export GOEXPERIMENT=arenas
+	# Keep glibc symbol versions low on Linux so release binaries and the FFmpeg
+	# libs we ship run on distros older than the build host. See the header for why
+	# it only remaps __isoc23_* and not everything.
+	if [[ "$(tolower "${targetOS}")" != "android" ]] && [[ "$(uname -s)" == "Linux" ]]; then
+		local glibc_hdr="$PWD/build/glibc_compat.h"
+		if [[ -f "$glibc_hdr" ]]; then
+			export CFLAGS="${CFLAGS:-} -include $glibc_hdr"
+			export CXXFLAGS="${CXXFLAGS:-} -include $glibc_hdr"
+			export CGO_CFLAGS="${CGO_CFLAGS:-} -include $glibc_hdr"
+			export CGO_CXXFLAGS="${CGO_CXXFLAGS:-} -include $glibc_hdr"
+		fi
+	fi
 
 	# Decide output location:
 	# - Non-macOS: binary in top-level (.) and runtime libs in ./lib
@@ -376,9 +457,13 @@ function main() {
 			varAndroid
 			build
 		;;
+		[iI][oO][sS])
+			variOS
+			build
+		;;
 		*)
 			echo "Unknown target: ${targetOS}"
-			echo "Valid targets: Win64 Win32 MacOS MacOSARM Linux LinuxARM"
+			echo "Valid targets: Win64 Win32 MacOS MacOSARM Linux LinuxARM Android iOS"
 			exit 1
 		;;
 	esac
@@ -460,10 +545,51 @@ function varAndroid() {
 	export ANDROID_DEPS_PATH="$REPO_ROOT/build/android-deps"
 	# Force pkg-config to ONLY look at the Android libraries
 	export PKG_CONFIG_LIBDIR="$ANDROID_DEPS_PATH/lib/pkgconfig"
-	export PKG_CONFIG_SYSROOT_DIR="$ANDROID_DEPS_PATH"
+	unset PKG_CONFIG_SYSROOT_DIR
 	# Ensure we don't pick up host libraries by clearing this
 	export PKG_CONFIG_PATH=""
 	binName="libmain.so"
+}
+function variOS() {
+	if [[ "$OSTYPE" != darwin* ]]; then
+		echo "ERROR: the iOS target must be built on macOS with Xcode installed." >&2
+		exit 1
+	fi
+	local sdk="iphoneos"
+	local min_ios_version="$IOS_MIN_VERSION"
+
+	export GOOS=ios
+	export GOARCH=arm64
+	export CGO_ENABLED=1
+
+	export SDKROOT="$(xcrun --sdk "$sdk" --show-sdk-path)"
+	export CC="$(xcrun --sdk "$sdk" --find clang)"
+	export CXX="$(xcrun --sdk "$sdk" --find clang++)"
+	export AR="$(xcrun --sdk "$sdk" --find ar)"
+	export RANLIB="$(xcrun --sdk "$sdk" --find ranlib)"
+	export STRIP="$(xcrun --sdk "$sdk" --find strip)"
+
+	export IOS_DEPS_PATH="$REPO_ROOT/build/ios-deps"
+	mkdir -p "$IOS_DEPS_PATH/lib/pkgconfig" "$IOS_DEPS_PATH/include"
+
+	# No Vulkan/MoltenVK headers needed here: github.com/Eiton/vulkan bundles its own
+	# and resolves MoltenVK via dlsym. MoltenVK is only linked by the Xcode app.
+	export IOS_CFLAGS="-I$IOS_DEPS_PATH/include -target arm64-apple-ios${min_ios_version} -isysroot $SDKROOT"
+	export IOS_LDFLAGS="-target arm64-apple-ios${min_ios_version} -isysroot $SDKROOT"
+
+	# Apple targets
+	export CGO_CFLAGS="$IOS_CFLAGS"
+	export CGO_CXXFLAGS="$IOS_CFLAGS"
+	export CGO_LDFLAGS="$IOS_LDFLAGS"
+
+	# Ensure we don't pick up host libraries by clearing this
+	export PKG_CONFIG_PATH=""
+	export PKG_CONFIG_LIBDIR="$IOS_DEPS_PATH/lib/pkgconfig"
+	# Our .pc files already hold absolute paths; a sysroot prefix would break them
+	# (build_ffmpeg cleared it, but skips that when FFmpeg is cached).
+	export PKG_CONFIG_SYSROOT_DIR=""
+
+	binName="libikemen.a"
 }
 
 # --- FFmpeg detection / build ---
@@ -491,6 +617,8 @@ function build_libvpx() {
 	local prefix="$LIBVPX_PREFIX"
 	if [[ "$GOOS" == "android" ]]; then
 		prefix="$ANDROID_DEPS_PATH"
+	elif [[ "$GOOS" == "ios" ]]; then
+		prefix="$IOS_DEPS_PATH"
 	fi
 
 	if [[ -f "$prefix/lib/pkgconfig/vpx.pc" ]]; then
@@ -517,6 +645,7 @@ function build_libvpx() {
 		linux/amd64) target="x86_64-linux-gcc" ;;
 		linux/arm64) target="arm64-linux-gcc" ;;
 		android/arm64) target="arm64-android-gcc" ;;
+		ios/arm64) target="arm64-darwin-gcc" ;;
 		*)
 			echo "ERROR: Unsupported libvpx target: $GOOS/$arch" >&2
 			return 1
@@ -544,6 +673,16 @@ function build_libvpx() {
 		CC="$CC" CXX="$CXX" \
 			AR="$TOOLCHAIN/bin/llvm-ar" LD="$CC" STRIP="$TOOLCHAIN/bin/llvm-strip" \
 			../configure "${configure_args[@]}"
+	elif [[ "$GOOS" == "ios" ]]; then
+		CFLAGS="${IOS_CFLAGS} ${CFLAGS:-}" \
+		CXXFLAGS="${IOS_CFLAGS} ${CXXFLAGS:-}" \
+		LDFLAGS="${IOS_LDFLAGS} ${LDFLAGS:-}" \
+		CC="$CC" \
+		CXX="$CXX" \
+		AR="$AR" \
+		RANLIB="$RANLIB" \
+		STRIP="$STRIP" \
+		../configure "${configure_args[@]}"
 	else
 		CC="${CC:-cc}" CXX="${CXX:-c++}" ../configure "${configure_args[@]}"
 	fi
@@ -569,6 +708,8 @@ function build_ffmpeg() {
 	local ffmpeg_pc="$FFMPEG_PREFIX/lib/pkgconfig/libavcodec.pc"
 	if [[ "$GOOS" == "android" ]]; then
 		ffmpeg_pc="$ANDROID_DEPS_PATH/lib/pkgconfig/libavcodec.pc"
+	elif [[ "$GOOS" == "ios" ]]; then
+		ffmpeg_pc="$IOS_DEPS_PATH/lib/pkgconfig/libavcodec.pc"
 	fi
 	if [[ -f "$ffmpeg_pc" && -f "$FFMPEG_SRCDIR/config_components.h" ]] &&
 		grep -q '^#define CONFIG_LIBVPX_VP8_DECODER 1' "$FFMPEG_SRCDIR/config_components.h" &&
@@ -619,6 +760,40 @@ function build_ffmpeg() {
 			"--enable-jni" "--enable-mediacodec"
 			"--pkg-config=$(which pkg-config)"
 		)
+	elif [[ "$GOOS" == "ios" ]]; then
+		local prefix="$IOS_DEPS_PATH"
+		export PKG_CONFIG_SYSROOT_DIR=""
+		export PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
+
+    	local configure_args=(
+			"--prefix=$prefix"
+			"--enable-cross-compile"
+			"--target-os=darwin"
+			"--arch=arm64"
+			"--cc=$CC"
+			"--cxx=$CXX"
+			"--ar=$AR"
+			"--ranlib=$RANLIB"
+			"--strip=$STRIP"
+
+        	"--extra-cflags=$IOS_CFLAGS -I$prefix/include"
+			"--extra-ldflags=$IOS_LDFLAGS -L$prefix/lib"
+
+        	"--pkg-config=$(command -v pkg-config)"
+			"--pkg-config-flags=--static"
+
+        	"--enable-static" "--disable-shared"
+			"--disable-gpl" "--disable-nonfree"
+			"--disable-debug" "--disable-doc" "--disable-programs" "--disable-everything"
+			"--disable-autodetect"
+        	"--enable-avformat" "--enable-avcodec" "--enable-avutil" "--enable-swresample" "--enable-swscale"
+			"--enable-avfilter" "--enable-filter=buffer,buffersink,format,scale,pad,crop"
+			"--enable-libvpx"
+			"--enable-protocol=file"
+			"--enable-demuxer=matroska,webm"
+			"--enable-decoder=libvpx_vp8,libvpx_vp9,opus,vorbis"
+			"--enable-parser=vp8,vp9,opus,vorbis"
+		)
 	else
 		local configure_args=(
 			"--prefix=$FFMPEG_PREFIX"
@@ -652,6 +827,21 @@ function build_ffmpeg() {
 	} > BUILDINFO.txt
 
 	./configure "${configure_args[@]}"
+
+	# By default FFmpeg only warns when an explicitly requested external decoder cannot be built.
+	if ! grep -q '^#define CONFIG_LIBVPX_VP8_DECODER 1' config_components.h ||
+	   ! grep -q '^#define CONFIG_LIBVPX_VP9_DECODER 1' config_components.h; then
+		echo "ERROR: FFmpeg configured without the required libvpx VP8/VP9 decoders." >&2
+		echo "libvpx pkg-config flags:" >&2
+		"${PKG_CONFIG:-pkg-config}" --cflags --libs vpx >&2 || true
+		echo "Relevant FFmpeg configure diagnostics:" >&2
+		grep -E \
+			'libvpx_vp[89]_decoder|vpx_codec_vp[89]_dx|ERROR|error:' \
+			ffbuild/config.log >&2 || true
+		popd >/dev/null
+		return 1
+	fi
+
 	echo "==> Configure complete. Starting make..."
 	make -j"$(getconf _NPROCESSORS_ONLN || echo 2)"
 	echo "==> Build complete. Installing..."
@@ -661,6 +851,8 @@ function build_ffmpeg() {
 	local pcdir="$FFMPEG_PREFIX/lib/pkgconfig"
 	if [[ "$GOOS" == "android" ]]; then
 		pcdir="$ANDROID_DEPS_PATH/lib/pkgconfig"
+	elif [[ "$GOOS" == "ios" ]]; then
+		pcdir="$IOS_DEPS_PATH/lib/pkgconfig"
 	fi
 	echo "==> FFmpeg pkg-config files installed to: $pcdir"
 	ls -l "$pcdir" || true
@@ -757,6 +949,60 @@ EOF
 	fi
 }
 
+function create_sdl2_pc() {
+    local pc_dir="$IOS_DEPS_PATH/lib/pkgconfig"
+    local sdl2_pc="$pc_dir/sdl2.pc"
+
+    local sdl2_framework="$IOS_WRAPPER_DIR/Frameworks/SDL2.xcframework/ios-arm64/SDL2.framework"
+    local sdl2_headers="$sdl2_framework/Headers"
+    local sdl2_include="$IOS_DEPS_PATH/include"
+
+    echo "==> Preparing SDL2 headers for iOS..."
+
+    if [[ ! -d "$sdl2_framework" ]]; then
+        echo "ERROR: SDL2 framework not found:"
+        echo "       $sdl2_framework"
+        return 1
+    fi
+
+    if [[ ! -f "$sdl2_headers/SDL.h" ]]; then
+        echo "ERROR: SDL2 headers not found:"
+        echo "       $sdl2_headers"
+        return 1
+    fi
+
+    # SDL headers use includes such as:
+    #   #include <SDL2/SDL_main.h>
+	
+    # Therefore the include root must contain:
+    #   $IOS_DEPS_PATH/include/SDL2/SDL_main.h
+    rm -rf "$sdl2_include/SDL2"
+    mkdir -p "$sdl2_include/SDL2"
+
+    cp -R "$sdl2_headers/." "$sdl2_include/SDL2/"
+
+    echo "==> Creating sdl2.pc for iOS..."
+
+    mkdir -p "$pc_dir"
+
+	if [[ ! -f "$sdl2_pc" ]]; then
+    	cat > "$sdl2_pc" <<EOF
+prefix=$sdl2_framework
+includedir=$sdl2_include
+frameworkdir=\${prefix}/..
+
+Name: SDL2
+Description: SDL2 for iOS
+Version: 2.0.0
+Libs: -F\${frameworkdir} -framework SDL2
+Cflags: -I\${includedir}
+EOF
+	fi
+
+    echo "==> SDL2 pkg-config file:"
+    cat "$sdl2_pc"
+}
+
 download_file() {
 	local url="$1" out="$2"
 	mkdir -p "$(dirname "$out")"
@@ -786,14 +1032,14 @@ ensure_screenpack() {
 	git config --system --add safe.directory "$SCREENPACK_DIR" >/dev/null 2>&1 || true
 }
 
-ensure_android_runtime_assets() {
-	[[ "$GOOS" != "android" ]] && return 0
+ensure_mobile_runtime_assets() {
+	[[ "$GOOS" != "android" && "$GOOS" != "ios" ]] && return 0
 
-	# The Android APK must ship with the same runtime assets as desktop releases.
+	# The APK/IPA must ship with the same runtime assets as desktop releases.
 	# If the engine repo doesn't contain them (CI), pull from the Elecbyte screenpack.
 	ensure_screenpack
 
-	# external/gamecontrollerdb.txt (referenced by Android manifest)
+	# external/gamecontrollerdb.txt (referenced by the wrapper manifests)
 	local db="$REPO_ROOT/external/gamecontrollerdb.txt"
 	if [[ ! -f "$db" ]]; then
 		echo "==> Downloading SDL GameController DB..."
@@ -802,7 +1048,7 @@ ensure_android_runtime_assets() {
 			"$db"
 	fi
 
-	# data/system.base.def (referenced by Android manifest)
+	# data/system.base.def (referenced by the wrapper manifests)
 	local sys="$REPO_ROOT/data/system.base.def"
 	if [[ ! -f "$sys" ]]; then
 		echo "==> Generating data/system.base.def from src/resources/defaultMotif.ini..."
@@ -951,17 +1197,26 @@ function stage_android_apk_assets() {
 		exit 1
 	fi
 
-	echo "==> Staging assets into: $assets_dir (from $manifest)"
-	local screenpack="$SCREENPACK_DIR"
 	# Remove everything except manifest.txt so the APK content matches your engine tree
 	find "$assets_dir" -mindepth 1 -maxdepth 1 ! -name "manifest.txt" -exec rm -rf {} + 2>/dev/null || true
+
+	stage_manifest_assets "$manifest" "$assets_dir"
+}
+
+# Copy every path listed in a wrapper manifest (ikemen-droid / ikemen-ios) into dest_dir.
+# Paths are resolved against the engine repo first, then the Elecbyte screenpack clone.
+function stage_manifest_assets() {
+	local manifest="$1" dest_dir="$2"
+	local screenpack="$SCREENPACK_DIR"
+
+	echo "==> Staging assets into: $dest_dir (from $manifest)"
 
 	# manifest.txt is whitespace-separated (often a single long line)
 	local p src dst
 	while read -r p; do
 		[[ -z "$p" ]] && continue
 		src="$REPO_ROOT/$p"
-		dst="$assets_dir/$p"
+		dst="$dest_dir/$p"
 
 		# If not present in the engine repo, fall back to the Elecbyte screenpack clone.
 		if [[ ! -e "$src" && -n "$screenpack" && -e "$screenpack/$p" ]]; then
@@ -974,6 +1229,9 @@ function stage_android_apk_assets() {
 		elif [[ -f "$src" ]]; then
 			mkdir -p "$(dirname "$dst")"
 			cp -a "$src" "$dst"
+		elif [[ "$p" == */ ]]; then
+			# Trailing slash = directory the engine expects to exist, even if empty.
+			mkdir -p "$dst"
 		else
 			# If your tree doesn't include some optional paths from manifest, just warn.
 			echo "WARNING: Asset path missing in Ikemen-GO tree: $p" >&2
@@ -987,7 +1245,7 @@ function build_android_apk() {
 
 	ensure_android_sdk_for_gradle
 	sync_android_apk_repo
-	ensure_android_runtime_assets
+	ensure_mobile_runtime_assets
 	stage_android_apk_libs
 	stage_android_apk_assets
 
@@ -1013,6 +1271,233 @@ function build_android_apk() {
 
 	echo "==> APK ready: $ANDROID_APK_OUT"
 	popd >/dev/null
+}
+
+function prepare_ios_deps() {
+	[[ "$GOOS" != "ios" ]] && return 0
+	build_libxmp_ios
+	build_ffmpeg
+
+    export CGO_CFLAGS="-I$IOS_DEPS_PATH/include ${CGO_CFLAGS:-}"
+    export CGO_LDFLAGS="
+        -L$IOS_DEPS_PATH/lib
+		-Wl,-force_load,$IOS_DEPS_PATH/lib/libvpx.a
+        -lxmp
+        -lavfilter
+        -lswscale
+        -lswresample
+        -lavformat
+        -lavcodec
+        -lavutil
+        -lvpx
+        -lm
+        -lz
+        -framework AudioToolbox
+        -framework AVFoundation
+        ${CGO_LDFLAGS:-}
+    "
+}
+
+function build_libxmp_ios() {
+    local src="$BUILDDIR/libxmp-src"
+    local build_dir="$src/build-ios"
+    local prefix="$IOS_DEPS_PATH"
+
+    if [[ -f "$prefix/lib/libxmp.a" ]]; then
+        echo "==> Found existing iOS libxmp in $prefix"
+        ensure_pkg_config_path
+        return 0
+    fi
+
+    if [[ ! -d "$src/.git" ]]; then
+        rm -rf "$src"
+        echo "==> Cloning LibXMP..."
+        git clone https://github.com/libxmp/libxmp.git "$src"
+    else
+        echo "==> LibXMP sources already exist in $src"
+    fi
+
+    echo "==> Building LibXMP for iOS..."
+
+    rm -rf "$build_dir"
+    mkdir -p "$build_dir"
+    pushd "$build_dir" >/dev/null
+
+    cmake .. \
+        -DCMAKE_SYSTEM_NAME=iOS \
+        -DCMAKE_OSX_SYSROOT=iphoneos \
+        -DCMAKE_OSX_ARCHITECTURES=arm64 \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_MIN_VERSION" \
+        -DCMAKE_C_COMPILER="$CC" \
+        -DCMAKE_INSTALL_PREFIX="$prefix" \
+        -DBUILD_STATIC=ON \
+        -DBUILD_SHARED=OFF \
+        -DBUILD_TESTING=OFF \
+        -DENABLE_TESTS=OFF
+
+    echo "==> Configure complete. Starting make..."
+    cmake --build . --parallel "$(getconf _NPROCESSORS_ONLN || echo 2)"
+
+    echo "==> Build complete. Installing..."
+    cmake --install .
+
+    echo "==> LibXMP files installed to: $prefix"
+    ls -l "$prefix/lib/libxmp.a" || true
+
+    popd >/dev/null
+
+    ensure_pkg_config_path
+}
+
+# Run xcodebuild without the cross-compile environment exported by variOS, so
+# Xcode picks its own toolchain and SDK for the target it is building.
+function xcodebuild_clean() {
+	env -u CC -u CXX -u AR -u RANLIB -u STRIP -u SDKROOT \
+		-u CFLAGS -u CXXFLAGS -u LDFLAGS \
+		-u PKG_CONFIG_PATH -u PKG_CONFIG_LIBDIR -u PKG_CONFIG_SYSROOT_DIR \
+		xcodebuild "$@"
+}
+
+# Resolve the ikemen-ios Xcode wrapper. IOS_WRAPPER_DIR (if set) is used in place;
+# otherwise IOS_APP_REPO@IOS_APP_REF is cloned into build/ios-app/ikemen-ios.
+function sync_ios_app_repo() {
+	if [[ -n "$IOS_WRAPPER_DIR" ]]; then
+		if [[ ! -d "$IOS_WRAPPER_DIR/I.K.E.M.E.N-Go.xcodeproj" ]]; then
+			echo "ERROR: IOS_WRAPPER_DIR is not an ikemen-ios checkout: $IOS_WRAPPER_DIR" >&2
+			exit 1
+		fi
+		IOS_WRAPPER_DIR="$(cd "$IOS_WRAPPER_DIR" && pwd -P)"
+		echo "==> Using local ikemen-ios checkout in-place: $IOS_WRAPPER_DIR"
+		return 0
+	fi
+
+	IOS_WRAPPER_DIR="$REPO_ROOT/$BUILDDIR/ios-app/ikemen-ios"
+	mkdir -p "$(dirname "$IOS_WRAPPER_DIR")"
+	if [[ ! -d "$IOS_WRAPPER_DIR/.git" ]]; then
+		rm -rf "$IOS_WRAPPER_DIR"
+		echo "==> Cloning ikemen-ios: $IOS_APP_REPO ($IOS_APP_REF) -> $IOS_WRAPPER_DIR"
+		git clone --depth=1 -b "$IOS_APP_REF" "$IOS_APP_REPO" "$IOS_WRAPPER_DIR"
+	else
+		echo "==> Updating ikemen-ios in $IOS_WRAPPER_DIR ($IOS_APP_REF)"
+		( cd "$IOS_WRAPPER_DIR" \
+			&& git fetch --depth=1 origin "$IOS_APP_REF" \
+			&& git checkout -f FETCH_HEAD )
+	fi
+}
+
+# SDL2.xcframework for the wrapper. Built from source ($SDL2_REV) because SDL2
+# releases do not ship an iOS binary. Skipped when the wrapper already has one.
+function ensure_ios_sdl2_framework() {
+	local xcfw="$IOS_WRAPPER_DIR/Frameworks/SDL2.xcframework"
+	if [[ -f "$xcfw/ios-arm64/SDL2.framework/Headers/SDL.h" ]]; then
+		echo "==> Found SDL2.xcframework in $IOS_WRAPPER_DIR/Frameworks"
+		return 0
+	fi
+
+	echo "==> Building SDL2 $SDL2_REV xcframework for iOS"
+	if [[ ! -d "$SDL2_SRCDIR/.git" ]]; then
+		rm -rf "$SDL2_SRCDIR"
+		git clone --depth=1 -b "$SDL2_REV" https://github.com/libsdl-org/SDL.git "$SDL2_SRCDIR"
+	fi
+
+	local archive="$REPO_ROOT/$BUILDDIR/ios-app/SDL2-iphoneos.xcarchive"
+	rm -rf "$archive"
+	xcodebuild_clean archive \
+		-project "$SDL2_SRCDIR/Xcode/SDL/SDL.xcodeproj" \
+		-scheme Framework-iOS \
+		-destination 'generic/platform=iOS' \
+		-archivePath "$archive" \
+		BUILD_LIBRARY_FOR_DISTRIBUTION=YES SKIP_INSTALL=NO \
+		IPHONEOS_DEPLOYMENT_TARGET="$IOS_MIN_VERSION" \
+		CODE_SIGNING_ALLOWED=NO
+
+	mkdir -p "$(dirname "$xcfw")"
+	rm -rf "$xcfw"
+	xcodebuild_clean -create-xcframework \
+		-framework "$archive/Products/Library/Frameworks/SDL2.framework" \
+		-output "$xcfw"
+	if [[ ! -f "$xcfw/ios-arm64/SDL2.framework/Headers/SDL.h" ]]; then
+		echo "ERROR: SDL2.xcframework has no ios-arm64 slice: $xcfw" >&2
+		exit 1
+	fi
+}
+
+# MoltenVK.xcframework (dynamic) for the wrapper, from the pinned Khronos release.
+function ensure_ios_moltenvk_framework() {
+	local xcfw="$IOS_WRAPPER_DIR/Frameworks/MoltenVK.xcframework"
+	if [[ -d "$xcfw/ios-arm64/MoltenVK.framework" ]]; then
+		echo "==> Found MoltenVK.xcframework in $IOS_WRAPPER_DIR/Frameworks"
+		return 0
+	fi
+
+	echo "==> Downloading MoltenVK $MOLTENVK_REV for iOS"
+	local work="$REPO_ROOT/$BUILDDIR/ios-app/moltenvk"
+	rm -rf "$work"
+	mkdir -p "$work"
+	download_file \
+		"https://github.com/KhronosGroup/MoltenVK/releases/download/$MOLTENVK_REV/MoltenVK-ios.tar" \
+		"$work/MoltenVK-ios.tar"
+	tar -xf "$work/MoltenVK-ios.tar" -C "$work"
+
+	mkdir -p "$(dirname "$xcfw")"
+	rm -rf "$xcfw"
+	cp -R "$work/MoltenVK/MoltenVK/dynamic/MoltenVK.xcframework" "$xcfw"
+	rm -rf "$work"
+}
+
+# Package the wrapper into an unsigned IPA. Users sign it themselves when
+# sideloading (Apple requires a per-user signature outside the App Store).
+function build_ios_ipa() {
+	[[ "$GOOS" != "ios" ]] && return 0
+	[[ "$BUILD_IOS_IPA" == "0" ]] && { echo "==> BUILD_IOS_IPA=0: skipping IPA build"; return 0; }
+
+	ensure_mobile_runtime_assets
+
+	# DefaultAssets.zip: manifest.txt plus every path it lists, all at the zip root.
+	local assets_dir="$IOS_WRAPPER_DIR/DefaultAssets"
+	local manifest="$assets_dir/manifest.txt"
+	if [[ ! -f "$manifest" ]]; then
+		echo "ERROR: ikemen-ios manifest not found at: $manifest" >&2
+		exit 1
+	fi
+	find "$assets_dir" -mindepth 1 -maxdepth 1 ! -name "manifest.txt" -exec rm -rf {} + 2>/dev/null || true
+	stage_manifest_assets "$manifest" "$assets_dir"
+	rm -f "$IOS_WRAPPER_DIR/DefaultAssets.zip"
+	( cd "$assets_dir" && zip -qr -X "$IOS_WRAPPER_DIR/DefaultAssets.zip" . )
+
+	local out="$REPO_ROOT/$BUILDDIR/ios-app/out"
+	rm -rf "$out"
+
+	local version_args=()
+	local app_version="$IOS_APP_VERSION"
+	if [[ -z "$app_version" && "$APP_VERSION" =~ ^v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+		app_version="${BASH_REMATCH[1]}"
+	fi
+	[[ -n "$app_version" ]] && version_args+=("MARKETING_VERSION=$app_version")
+	[[ -n "$IOS_BUILD_NUMBER" ]] && version_args+=("CURRENT_PROJECT_VERSION=$IOS_BUILD_NUMBER")
+
+	echo "==> Building IPA with xcodebuild (unsigned)..."
+	xcodebuild_clean archive \
+		-project "$IOS_WRAPPER_DIR/I.K.E.M.E.N-Go.xcodeproj" \
+		-scheme I.K.E.M.E.N-Go \
+		-configuration Release \
+		-destination 'generic/platform=iOS' \
+		-derivedDataPath "$out/DerivedData" \
+		-archivePath "$out/ikemen.xcarchive" \
+		IPHONEOS_DEPLOYMENT_TARGET="$IOS_MIN_VERSION" \
+		${version_args[@]+"${version_args[@]}"} \
+		CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM=""
+
+	local app="$out/ikemen.xcarchive/Products/Applications/I.K.E.M.E.N-Go.app"
+	if [[ ! -d "$app" ]]; then
+		echo "ERROR: xcodebuild finished but app not found at: $app" >&2
+		exit 1
+	fi
+	mkdir -p "$out/ipa/Payload" "$(dirname "$IOS_IPA_OUT")"
+	cp -R "$app" "$out/ipa/Payload/"
+	rm -f "$IOS_IPA_OUT"
+	( cd "$out/ipa" && zip -qry "$IOS_IPA_OUT" Payload )
+	echo "==> IPA ready: $IOS_IPA_OUT"
 }
 
 function maybe_build_ffmpeg() {
@@ -1084,11 +1569,24 @@ function build() {
 		local deps_libs="-L$ANDROID_DEPS_PATH/lib -lSDL2 -lxmp -lavformat -lavcodec -lavutil -lswscale -lswresample -lavfilter"
 		# Link against Android system libraries (GLES, OpenSLES, log)
 		export CGO_LDFLAGS="${deps_libs} ${CGO_LDFLAGS:-} -lGLESv2 -lOpenSLES -llog -Wl,-z,max-page-size=16384"
+	elif [[ "$GOOS" == "ios" ]]; then
+		# MANUALLY define flags for iOS to avoid pkg-config errors
+		# The wrapper supplies SDL2 (headers for cgo) and SDLWindowFix.h, so it must exist first.
+		sync_ios_app_repo
+		ensure_ios_sdl2_framework
+		ensure_ios_moltenvk_framework
+		prepare_ios_deps
+		create_sdl2_pc
+		export CGO_CFLAGS="-DSDL_MAIN_HANDLED -I${IOS_WRAPPER_DIR}/Frameworks/SDL2.xcframework/ios-arm64/SDL2.framework/Headers -I${IOS_WRAPPER_DIR}/I.K.E.M.E.N-Go ${CGO_CFLAGS:-}"
 	else
 		maybe_build_ffmpeg
 		export PKG_CONFIG="${PKG_CONFIG:-pkg-config}"
 		# Ensure libxmp is present
 		require_libxmp
+		# Build SDL2 ourselves only when asked (release builds); else use the system one.
+		if [[ "$BUILD_SDL2" == "yes" && "$GOOS" == "linux" ]]; then
+			build_sdl2
+		fi
 		# Ensure SDL2 is present
 		require_sdl2
 		# Pull dependency flags from pkg-config (FFmpeg + libxmp + SDL2)
@@ -1099,7 +1597,7 @@ function build() {
 		if [[ "$GOOS" == "linux" ]]; then
 			export CGO_LDFLAGS="${deps_libs} -lpthread -lm -ldl -lz -Wl,-rpath,\$ORIGIN -Wl,-rpath,\$ORIGIN/lib ${CGO_LDFLAGS:-}"
 		elif [[ "$GOOS" == "darwin" ]]; then
-			export CGO_LDFLAGS="${deps_libs} ${CGO_LDFLAGS:-} -Wl,-rpath,@executable_path -Wl,-rpath,@executable_path/../Frameworks"
+			export CGO_LDFLAGS="${deps_libs} ${CGO_LDFLAGS:-} -Wl,-rpath,@executable_path/../lib -Wl,-rpath,@executable_path/../Frameworks"
 		fi		
 	fi
 
@@ -1113,6 +1611,10 @@ function build() {
 		go build -buildmode=c-shared -trimpath -v -tags=android,gles2 \
 		-ldflags="-s -w -X 'main.Version=${APP_VERSION}' -X 'main.BuildTime=${APP_BUILDTIME}' -X 'runtime.godebugDefault=asyncpreemptoff=1,sigaltstack=0'" \
 		-o "$OUTDIR/$binName" ./src
+	elif [[ "$GOOS" == "ios" ]]; then
+		go build -buildmode=c-archive -trimpath -v -tags=ios \
+		-ldflags="-s -w -X 'main.Version=${APP_VERSION}' -X 'main.BuildTime=${APP_BUILDTIME}'" \
+		-o "$OUTDIR/$binName" ./src
 	else
 		go build -trimpath -v \
 		-ldflags "-s -w -X 'main.Version=${APP_VERSION}' -X 'main.BuildTime=${APP_BUILDTIME}'" \
@@ -1120,7 +1622,21 @@ function build() {
 	fi
 
 	# bundle libs
-	bundle_shared_libs
+	if [[ "$GOOS" != "ios" ]]; then
+		bundle_shared_libs
+		fix_macos_dylib_paths
+	else
+		# Fix iOS header
+		headerName="${binName%.a}.h"
+		sed_inplace 's/#include "SDL.h"/#include <SDL2\/SDL.h>/g' "$OUTDIR/$headerName"
+
+		# Copy the headers and libs to the wrapper dir
+		cp "$IOS_DEPS_PATH/lib"/*.a "$IOS_WRAPPER_DIR/"
+		cp "$OUTDIR/$headerName" "$IOS_WRAPPER_DIR/"
+		cp "$OUTDIR/$binName" "$IOS_WRAPPER_DIR/"
+		echo "==> Copied libs to wrapper dir: $IOS_WRAPPER_DIR/"
+		build_ios_ipa
+	fi
 
 	# For Android, optionally build the APK via ikemen-droid
 	build_android_apk
@@ -1319,29 +1835,55 @@ function bundle_shared_libs() {
 				[[ -f "$d" ]] && { mvk="$d"; break; }
 			done
 		fi
-		[[ -n "$mvk" ]] && cp -av "$mvk" "$dest_lib/" 2>/dev/null || true
+		[[ -n "$mvk" ]] && cp -Lfv "$mvk" "$dest_lib/" 2>/dev/null || true
 	fi
 	# Android specific bundling
 	if [[ "$GOOS" == "android" ]]; then
 		echo "==> Bundling Android dependencies from $ANDROID_DEPS_PATH..."
 		cp -av "$ANDROID_DEPS_PATH"/lib/*.so* "$dest_lib/" 2>/dev/null || true
 	fi
-	# Always try to bundle libxmp for portable runtime on Linux/macOS.
+	# Always try to bundle libxmp and SDL for portable runtime on Linux/macOS.
 	# (Windows and Android were handled above.)
 	if [[ "$GOOS" != "windows" && "$GOOS" != "android" ]]; then
 		# Prefer pkg-config to locate the correct lib directory.
-		local pc libdir libdir_sdl2
+		local pc libdir libdir_sdl2 libdir_sdl3
 		pc="${PKG_CONFIG:-pkg-config}"
 		libdir="$($pc --variable=libdir libxmp 2>/dev/null || true)"
 		if [[ -n "$libdir" && -d "$libdir" ]]; then
 			cp -av "${libdir}"/libxmp*.so*   "$dest_lib/" 2>/dev/null || true
-			cp -av "${libdir}"/libxmp*.dylib "$dest_lib/" 2>/dev/null || true
+			cp -Lfv "${libdir}"/libxmp*.dylib "$dest_lib/" 2>/dev/null || true
 		fi
 		libdir_sdl2="$($pc --variable=libdir sdl2 2>/dev/null || true)"
 		if [[ -n "$libdir_sdl2" && -d "$libdir_sdl2" ]]; then
 			cp -av "${libdir_sdl2}"/libSDL2*.so*   "$dest_lib/" 2>/dev/null || true
-			cp -av "${libdir_sdl2}"/libSDL2*.dylib "$dest_lib/" 2>/dev/null || true
+			cp -Lfv "${libdir_sdl2}"/libSDL2*.dylib "$dest_lib/" 2>/dev/null || true
 		fi
+		# Homebrew's SDL2 compatibility library loads SDL3 at runtime.
+		libdir_sdl3="$($pc --variable=libdir sdl3 2>/dev/null || true)"
+		if [[ -n "$libdir_sdl3" && -d "$libdir_sdl3" ]]; then
+			cp -Lfv "${libdir_sdl3}"/libSDL3*.dylib "$dest_lib/" 2>/dev/null || true
+		fi
+	fi
+}
+
+# Use bundled libraries instead of Homebrew paths in the macOS binary.
+function fix_macos_dylib_paths() {
+	[[ "$GOOS" != "darwin" ]] && return 0
+
+	local binary="$OUTDIR/$binName"
+	local dependency dependencies filename changed=0
+	dependencies="$(otool -L "$binary" | awk 'NR > 1 { sub(/^[[:space:]]+/, ""); sub(/ \(compatibility version.*$/, ""); print }')"
+	while IFS= read -r dependency; do
+		filename="${dependency##*/}"
+		if [[ -n "$dependency" && "$dependency" != @* && -e "$LIBDIR/$filename" ]]; then
+			install_name_tool -change "$dependency" "@rpath/$filename" "$binary"
+			changed=1
+		fi
+	done <<< "$dependencies"
+
+	# install_name_tool invalidates the ad-hoc signature required on Apple Silicon.
+	if ((changed)); then
+		codesign --force --sign - "$binary"
 	fi
 }
 

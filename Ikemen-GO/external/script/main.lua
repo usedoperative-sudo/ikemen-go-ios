@@ -249,6 +249,12 @@ end
 if getCommandLineValue("-height") ~= nil then 
 	modifyGameOption('Video.GameHeight', getCommandLineValue("-height"))
 end
+if getCommandLineValue("-tcpport") ~= nil then
+	modifyGameOption('Netplay.ListenPort', getCommandLineValue("-tcpport"))
+end
+if getCommandLineValue("-udpport") ~= nil then
+	modifyGameOption('Netplay.Rollback.Port', getCommandLineValue("-udpport"))
+end
 
 -- Lua Hook System
 -- Allows hooking additional code into existing functions, from within external
@@ -1590,19 +1596,40 @@ for line in content:gmatch('[^\r\n]+') do
 			csRow = math.floor(csCell / motif.select_info.columns) + 1
 			cellKey = (csCol - 1) .. '-' .. (csRow - 1)
 		end
-		if lineCase:match(',%s*exclude%s*=%s*1') then --character should be added after all slots are filled
-			table.insert(t_addExluded, line)
-		elseif lineCase:match('^%s*slot%s*=%s*{%s*$') then --start of the 'multiple chars in one slot' assignment
+		local slotStart = lineCase:match('^%s*slot%s*=%s*{%s*()')
+		if slotStart ~= nil then
 			table.insert(main.t_selGrid, {['chars'] = {}, ['slot'] = 1})
 			slot = true
-		elseif slot and lineCase:match('^%s*}%s*$') then --end of 'multiple chars in one slot' assignment
-			slot = false
-			csCell = csCell + 1
-		else
-			main.f_addChar(line, true, true, slot)
-			if not slot then
+			line = line:sub(slotStart)
+			lineCase = line:lower()
+		end
+		local slotEnd = false
+		if slot then
+			local slotLine = line:match('^(.-)%s*}%s*$')
+			if slotLine ~= nil then
+				line = slotLine
+				lineCase = line:lower()
+				slotEnd = true
+			end
+		end
+		if lineCase:match(',%s*exclude%s*=%s*1') then --character should be added after all slots are filled
+			table.insert(t_addExluded, line)
+		elseif line:match('%S') then
+			if slot then
+				for _, entry in ipairs(main.f_strsplit('|', line)) do
+					entry = entry:match('^%s*(.-)%s*$')
+					if entry ~= '' then
+						main.f_addChar(entry, true, true, true)
+					end
+				end
+			else
+				main.f_addChar(line, true, true, false)
 				csCell = csCell + 1
 			end
+		end
+		if slotEnd then
+			slot = false
+			csCell = csCell + 1
 		end
 	elseif section == 2 then --[ExtraStages]
 		--store 'unlock' param and get rid of everything that follows it
@@ -2347,6 +2374,7 @@ main.t_itemname = {
 		--main.fightscreen.p2ailevel = true
 		main.makeRoster = true
 		main.motif.hiscore = true
+		main.motif.losescreen = true
 		main.motif.winscreen = true
 		main.matchWins.draw = {0, 0}
 		main.matchWins.simul = {1, 1}
@@ -3985,7 +4013,11 @@ end
 local t_modules = {}
 for _, v in ipairs(getDirectoryFiles('external/mods')) do
 	if v:lower():match('%.([^%.\\/]-)$') == 'lua' then
-		table.insert(t_modules, v)
+		local fileName = v:match("[^/\\]+$") or v
+		-- Lua files prefixed with '-' are excluded from autoloading
+		if not fileName:match("^%-") then
+			table.insert(t_modules, v)
+		end
 	end
 end
 

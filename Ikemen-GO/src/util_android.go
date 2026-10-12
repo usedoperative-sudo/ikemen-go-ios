@@ -118,6 +118,11 @@ func ShowErrorDialog(message string) {
 	Logcat(fmt.Sprintf("CRITICAL ERROR: %s", message))
 }
 
+// No interactive dialog here, so never retry
+func ShowRetryDialog(message string) bool {
+	return false
+}
+
 //export SDL_main
 func SDL_main(argc C.int, argv **C.char) C.int {
 	runtime.LockOSThread()
@@ -143,7 +148,24 @@ func eglGetProcAddress(name string) unsafe.Pointer {
 }
 
 func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
-	return &Renderer_GLES32{}, &FontRenderer_GLES32{}
+	var gfx Renderer
+	var gfxFont FontRenderer
+
+	// Now we proceed to init the renderer.
+	switch cfgVal {
+	case "OpenGL ES 3.2":
+		gfx = &Renderer_GLES32{}
+		gfxFont = &FontRenderer_GLES32{}
+	case "Vulkan 1.3":
+		gfx = &Renderer_VK{}
+		gfxFont = &FontRenderer_VK{}
+	default:
+		fmt.Printf("Error: Invalid RenderMode '%s'. Defaulting to OpenGL ES 3.2.\n", cfgVal)
+		gfx = &Renderer_GLES32{}
+		gfxFont = &FontRenderer_GLES32{}
+	}
+
+	return gfx, gfxFont
 }
 
 func getAndroidFilesDir() string {

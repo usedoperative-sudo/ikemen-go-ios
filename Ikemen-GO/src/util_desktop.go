@@ -1,4 +1,4 @@
-//go:build !raw && !android
+//go:build !raw && !android && !ios
 
 package main
 
@@ -23,6 +23,11 @@ func ShowInfoDialog(message, title string) {
 
 func ShowErrorDialog(message string) {
 	dialog.Message(message).Title("I.K.E.M.E.N Error").Error()
+}
+
+// Returns true if the user chose to retry
+func ShowRetryDialog(message string) bool {
+	return dialog.Message("%s", message).Title("I.K.E.M.E.N RetryLoadOnError").YesNo()
 }
 
 // TTF font loading

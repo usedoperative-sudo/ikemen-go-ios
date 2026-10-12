@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gopxl/beep/v2"
-	"github.com/gopxl/beep/v2/effects"
+	"github.com/ikemen-engine/beep/v2"
+	"github.com/ikemen-engine/beep/v2/effects"
 	"github.com/ikemen-engine/reisen"
 )
 
@@ -38,6 +38,7 @@ type bgVideo struct {
 	flag            BgVideoScaleFilter
 	playing         bool
 	visible         bool
+	muted           bool
 	videoCtrl       *beep.Ctrl
 	videoVol        *effects.Volume
 	audioSampleRate beep.SampleRate
@@ -149,10 +150,41 @@ func premultiplyVideoFrame(frame *image.RGBA) {
 
 func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf BgVideoScaleFilter, loop bool) error {
 	// fmt.Println("Opening media file:", filename)
-	m, err := reisen.NewMedia(filename)
+	f, err := OpenFile(filename)
 	if err != nil {
 		return err
 	}
+	m, err := reisen.NewMediaFromReader(f)
+	if err != nil {
+		f.Close()
+		return fmt.Errorf("opening video %s: %w", filename, err)
+	}
+	cleanup := func() {
+		if bgv.videoStream != nil {
+			bgv.videoStream.Close()
+			bgv.videoStream = nil
+		}
+		if bgv.audioStream != nil {
+			bgv.audioStream.Close()
+			bgv.audioStream = nil
+		}
+		m.CloseDecode()
+		m.Close()
+		bgv.media = nil
+		f.Close()
+		if bgv.videoCtrl != nil {
+			WithSpeakerLock(func() {
+				bgv.videoCtrl.Streamer = nil
+			})
+		}
+		bgv.inMixer = false
+	}
+	opened := false
+	defer func() {
+		if !opened {
+			cleanup()
+		}
+	}()
 
 	//bgv.describe()
 
@@ -182,7 +214,8 @@ func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf Bg
 		return fmt.Errorf("No decodable video streams in %s (check codecs in your FFmpeg build)", filename)
 	}
 
-	err = videoStreams[0].Open()
+	bgv.videoStream = videoStreams[0]
+	err = bgv.videoStream.Open()
 	if err != nil {
 		return err
 	}
@@ -199,14 +232,13 @@ func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf Bg
 			}
 		}
 	}
-	bgv.videoStream = videoStreams[0]
 
 	// Try to open the first audio stream, if any
 	audioStreams := bgv.media.AudioStreams()
 	if len(audioStreams) > 0 {
+		bgv.audioStream = audioStreams[0]
 		if err := audioStreams[0].Open(); err == nil {
-			bgv.audioStream = audioStreams[0]
-			// Build an independent chain mixed into sys.soundMixer
+			// Bypass WAV normalization: video audio uses BGM/master volume only.
 			bgv.audioSampleRate = beep.SampleRate(audioStreams[0].SampleRate())
 			rs := &reisenAudioStreamer{ch: bgv.audioBuffer}
 			bgv.videoVol = &effects.Volume{Streamer: rs, Base: 2}
@@ -216,7 +248,7 @@ func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf Bg
 			bgv.videoCtrl = &beep.Ctrl{Streamer: resampler, Paused: true} // start paused until SetPlaying(true)
 
 			WithSpeakerLock(func() {
-				sys.soundMixer.Add(bgv.videoCtrl)
+				sys.videoMixer.Add(bgv.videoCtrl)
 			})
 
 			bgv.inMixer = true
@@ -238,6 +270,7 @@ func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf Bg
 	bgv.haveBasePTS = false
 
 	// Decode loop. When EOF is reached and loop==true, rewind to t=0 and continue.
+	opened = true
 	SafeGo(func() {
 		defer close(bgv.done)
 		for {
@@ -261,7 +294,7 @@ func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf Bg
 			if bgv.loop {
 				// Prefer rewinding the VIDEO stream to keep A/V in sync per reisen docs.
 				if err := bgv.videoStream.Rewind(0); err != nil {
-					bgv.errs <- fmt.Errorf("loop rewind video failed: %v", err)
+					bgv.reportError(fmt.Errorf("loop rewind video failed: %v", err))
 					break
 				}
 				// Optional: also rewind audio if present; safe no-op if demux-only.
@@ -289,23 +322,17 @@ func (bgv *bgVideo) Open(filename string, volume int, sm BgVideoScaleMode, sf Bg
 		}
 	finish:
 		// Cleanup only when we actually finish (i.e., not looping forever).
-		bgv.videoStream.Close()
-		if bgv.audioStream != nil {
-			bgv.audioStream.Close()
-		}
-		if bgv.media != nil {
-			bgv.media.CloseDecode()
-		}
-		// Detach from mixer
-		if bgv.videoCtrl != nil {
-			WithSpeakerLock(func() {
-				bgv.videoCtrl.Streamer = nil
-			})
-		}
-		bgv.inMixer = false
+		cleanup()
 		close(bgv.frameBuffer)
 		close(bgv.audioBuffer)
 		close(bgv.errs)
+		select {
+		case <-bgv.quit:
+			// A canceled video will never consume its remaining buffered data.
+			drainFrames(bgv.frameBuffer)
+			drainAudio(bgv.audioBuffer)
+		default:
+		}
 	})
 
 	return nil
@@ -346,6 +373,13 @@ func (bgv *bgVideo) describe() error {
 	return nil
 }
 
+func (bgv *bgVideo) reportError(err error) {
+	select {
+	case bgv.errs <- err:
+	case <-bgv.quit:
+	}
+}
+
 func (bgv *bgVideo) processPacket() bool {
 	if bgv.media == nil {
 		// No media yet; nothing to do.
@@ -353,7 +387,7 @@ func (bgv *bgVideo) processPacket() bool {
 	}
 	packet, gotPacket, err := bgv.media.ReadPacket()
 	if err != nil {
-		bgv.errs <- err
+		bgv.reportError(err)
 	}
 
 	if !gotPacket {
@@ -366,7 +400,7 @@ func (bgv *bgVideo) processPacket() bool {
 		vf, gotFrame, err := s.ReadVideoFrame()
 
 		if err != nil {
-			bgv.errs <- err
+			bgv.reportError(err)
 		}
 
 		// Keep decoding even if this packet didn't yield a frame.
@@ -386,15 +420,23 @@ func (bgv *bgVideo) processPacket() bool {
 				sleepUntil := bgv.startWall.Add(elapsed)
 				d := time.Until(sleepUntil)
 				if d > 0 {
-					time.Sleep(d)
+					timer := time.NewTimer(d)
+					select {
+					case <-timer.C:
+					case <-bgv.quit:
+						timer.Stop()
+						return true
+					}
 				}
 			}
 			// Deliver only when visible; while hidden we still pace timers but drop frames.
 			if bgv.visible {
 				frame := vf.Image()
 				premultiplyVideoFrame(frame)
-				bgv.frameBuffer <- frame
-				bgv.lastFrame = frame // remember last for sticky reupload
+				select {
+				case bgv.frameBuffer <- frame:
+				case <-bgv.quit:
+				}
 			}
 		}
 
@@ -409,7 +451,7 @@ func (bgv *bgVideo) processPacket() bool {
 		s := bgv.media.Streams()[packet.StreamIndex()].(*reisen.AudioStream)
 		af, gotFrame, err := s.ReadAudioFrame()
 		if err != nil {
-			bgv.errs <- err
+			bgv.reportError(err)
 		}
 		if gotFrame && af != nil {
 			raw := af.Data()
@@ -468,7 +510,14 @@ func (bgv *bgVideo) Tick() error {
 		w := int32(rect.Dx())
 		h := int32(rect.Dy())
 		if bgv.texture == nil || w != bgv.texture.GetWidth() || h != bgv.texture.GetHeight() {
-			bgv.texture = gfx.newTexture(w, h, 32, true)
+			tex, err := gfx.newTexture(w, h, 32, true)
+			if err != nil {
+				LogMessage("[VRAM] failed to create video texture: " + err.Error() + "\n")
+				return nil
+			}
+			bgv.texture = tex
+			// Video textures are transient; the renderer's swap cache must not retain them.
+			bgv.texture.MarkNonSwappable()
 		}
 		bgv.texture.SetData(frame.Pix)
 		bgv.lastFrame = frame
@@ -479,7 +528,13 @@ func (bgv *bgVideo) Tick() error {
 			w := int32(rect.Dx())
 			h := int32(rect.Dy())
 			if bgv.texture == nil || w != bgv.texture.GetWidth() || h != bgv.texture.GetHeight() {
-				bgv.texture = gfx.newTexture(w, h, 32, true)
+				tex, err := gfx.newTexture(w, h, 32, true)
+				if err != nil {
+					LogMessage("[VRAM] failed to create video texture: " + err.Error() + "\n")
+					return nil
+				}
+				bgv.texture = tex
+				bgv.texture.MarkNonSwappable()
 			}
 			bgv.texture.SetData(bgv.lastFrame.Pix)
 		}
@@ -490,6 +545,8 @@ func (bgv *bgVideo) Tick() error {
 
 // SetPlaying toggles decode/audio production and (re)anchors the pacing clock.
 func (bgv *bgVideo) SetPlaying(on bool) {
+	// Refresh even when playback state is unchanged (e.g. volume menu changes).
+	bgv.updateAudioVolume()
 	// If the decode goroutine has already exited (EOF or Close), do not try to
 	// "resume" a dead stream (can happen on pause/unpause or BGCtrl toggles).
 	if bgv.done != nil {
@@ -512,7 +569,7 @@ func (bgv *bgVideo) SetPlaying(on bool) {
 		// Ensure we're attached to the mixer (it may have been cleared).
 		if bgv.videoCtrl != nil && !bgv.inMixer {
 			WithSpeakerLock(func() {
-				sys.soundMixer.Add(bgv.videoCtrl)
+				sys.videoMixer.Add(bgv.videoCtrl)
 			})
 			bgv.inMixer = true
 		}
@@ -706,20 +763,24 @@ func (bgv *bgVideo) updateAudioVolume() {
 		return
 	}
 	// Match BGM.UpdateVolume logic:
+	volume := Min(bgv.volume, sys.cfg.Sound.MaxBGMVolume)
 	vol := -5 + float64(sys.cfg.Sound.BGMVolume)*0.06*
 		(float64(sys.cfg.Sound.MasterVolume)/100.0)*
-		(float64(bgv.volume)/100.0)
+		(float64(volume)/100.0)*
+		(float64(sys.focusSoundVolume)/100.0)
 	if vol >= 1 {
 		vol = 1
 	}
-	silent := vol <= -5
+	_, noMusic := sys.cmdFlags["-nomusic"]
+	_, noSound := sys.cmdFlags["-nosound"]
+	silent := vol <= -5 || bgv.muted || !bgv.visible || noMusic || noSound
 	WithSpeakerLock(func() {
 		bgv.videoVol.Volume = vol
 		bgv.videoVol.Silent = silent
 	})
 }
 
-// MixerCleared should be called when sys.soundMixer.Clear() is executed,
+// MixerCleared should be called when sys.videoMixer.Clear() is executed,
 // so the next SetPlaying(true) can re-attach this stream.
 func (bgv *bgVideo) MixerCleared() {
 	bgv.inMixer = false
@@ -730,14 +791,17 @@ func (bgv *bgVideo) Close() {
 	// Quiesce producers and renderer first.
 	bgv.SetPlaying(false)
 	bgv.SetVisible(false)
-	// If already closed, return.
-	select {
-	case <-bgv.done:
-		return
-	default:
-	}
 	// Signal goroutine to exit; cleanup happens there.
 	if bgv.quit != nil {
-		close(bgv.quit)
+		select {
+		case <-bgv.quit:
+		default:
+			close(bgv.quit)
+		}
 	}
+	// Also release presentation data when decoding already ended at EOF.
+	bgv.texture = nil
+	bgv.lastFrame = nil
+	drainFrames(bgv.frameBuffer)
+	drainAudio(bgv.audioBuffer)
 }

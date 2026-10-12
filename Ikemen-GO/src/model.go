@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/zip"
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
@@ -12,10 +11,7 @@ import (
 	"image/draw"
 	_ "image/jpeg"
 	"io"
-	"io/fs"
 	"math"
-	"os"
-	"path"
 	"strconv"
 	"strings"
 
@@ -380,13 +376,34 @@ func loadEnvironment(filepath string) (*Environment, error) {
 				return
 			}
 			lowestMipLevel := int32(4)
-			env.hdrTexture.tex = gfx.newHDRTexture(int32(bounds.Max.X), int32(bounds.Max.Y))
+			var err error
+			env.hdrTexture.tex, err = gfx.newHDRTexture(int32(bounds.Max.X), int32(bounds.Max.Y))
+			if err != nil {
+				LogMessage("[VRAM] newHDRTexture failed: %v", err)
+				return
+			}
 
 			env.hdrTexture.tex.SetPixelData(data)
-			env.cubeMapTexture.tex = gfx.newCubeMapTexture(256, true, 0)
-			env.lambertianTexture.tex = gfx.newCubeMapTexture(256, false, 0)
-			env.GGXTexture.tex = gfx.newCubeMapTexture(256, true, lowestMipLevel)
-			env.GGXLUT.tex = gfx.newDataTexture(1024, 1024)
+			env.cubeMapTexture.tex, err = gfx.newCubeMapTexture(256, true, 0)
+			if err != nil {
+				LogMessage("[VRAM] newCubeMapTexture failed: %v", err)
+				return
+			}
+			env.lambertianTexture.tex, err = gfx.newCubeMapTexture(256, false, 0)
+			if err != nil {
+				LogMessage("[VRAM] newCubeMapTexture failed: %v", err)
+				return
+			}
+			env.GGXTexture.tex, err = gfx.newCubeMapTexture(256, true, lowestMipLevel)
+			if err != nil {
+				LogMessage("[VRAM] newCubeMapTexture failed: %v", err)
+				return
+			}
+			env.GGXLUT.tex, err = gfx.newDataTexture(1024, 1024)
+			if err != nil {
+				LogMessage("[VRAM] newDataTexture failed: %v", err)
+				return
+			}
 
 			gfx.RenderCubeMap(env.hdrTexture.tex, env.cubeMapTexture.tex)
 			gfx.RenderFilteredCubeMap(0, env.cubeMapTexture.tex, env.lambertianTexture.tex, 0, env.lambertianSampleCount, 0)
@@ -404,53 +421,33 @@ func loadEnvironment(filepath string) (*Environment, error) {
 func loadglTFModel(filepath string) (*Model, error) {
 	mdl := &Model{offset: [3]float32{0, 0, 0}, rotation: [3]float32{0, 0, 0}, scale: [3]float32{1, 1, 1}}
 
-	isZip, zipPath, pathInZip := IsZipPath(filepath)
-
-	var doc *gltf.Document
-	var err error
-
-	if isZip {
-		// Handle resources within a ZIP file
-		zipReader, errOpen := zip.OpenReader(zipPath)
-		if errOpen != nil {
-			return nil, fmt.Errorf("Failed to open ZIP archive '%s': %w", zipPath, errOpen)
-		}
-		defer zipReader.Close()
-
-		var fsys fs.FS = &zipReader.Reader // The zip.Reader implements fs.FS for resource resolution within the archive
-
-		// Open the GLB/glTF file from within the zip
-		glbFile, errOpen := fsys.Open(pathInZip)
-		if errOpen != nil {
-			return nil, fmt.Errorf("Failed to open GLB file '%s' in ZIP '%s': %w", pathInZip, zipPath, errOpen)
-		}
-		defer glbFile.Close()
-
-		// Create a new decoder with the file stream and the zip archive as the file system
-		decoder := gltf.NewDecoderFS(glbFile, fsys)
-		doc = new(gltf.Document)
-		if err = decoder.Decode(doc); err != nil {
-			return nil, fmt.Errorf("failed to decode gltf from zip '%s': %w", filepath, err)
-		}
-	} else {
-		// Handle resources from the standard file system
-		f, errOpen := OpenFile(filepath) // Use IKEMEN GO's file abstraction to handle case-insensitivity etc.
-		if errOpen != nil {
-			return nil, errOpen
-		}
-		defer f.Close()
-
-		// Use the directory of the file as the file system for resolving relative resources
-		fsm := os.DirFS(path.Dir(filepath))
-		decoder := gltf.NewDecoderFS(f, fsm)
-		doc = new(gltf.Document)
-		if err = decoder.Decode(doc); err != nil {
-			return nil, fmt.Errorf("failed to decode gltf from file '%s': %w", filepath, err)
-		}
+	f, err := OpenFile(filepath)
+	if err != nil {
+		return nil, err
 	}
+	defer f.Close()
 
-	if doc == nil {
-		return nil, fmt.Errorf("gltf document is nil after decoding for path: %s", filepath)
+	// Decode embedded data first; resolve external buffers through the shared file helpers.
+	doc := new(gltf.Document)
+	if err := gltf.NewDecoder(f).Decode(doc); err != nil {
+		return nil, fmt.Errorf("failed to decode gltf from file '%s': %w", filepath, err)
+	}
+	for _, buffer := range doc.Buffers {
+		if buffer.URI == "" || buffer.IsEmbeddedResource() {
+			continue
+		}
+		uri := buffer.URI
+		if err := LoadFile(&uri, []string{filepath}, "", func(filename string) error {
+			f, err := OpenFile(filename)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			buffer.Data, err = io.ReadAll(io.LimitReader(f, int64(buffer.ByteLength)))
+			return err
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	var images = make([]image.Image, 0, len(doc.Images))
@@ -541,7 +538,12 @@ func loadglTFModel(filepath string) (*Model, error) {
 				rgba := image.NewRGBA(img.Bounds())
 				draw.Draw(rgba, img.Bounds(), img, img.Bounds().Min, draw.Src)
 				sys.mainThreadTask <- func() {
-					texture.tex = gfx.newModelTexture(int32(img.Bounds().Max.X), int32(img.Bounds().Max.Y), 32, false)
+					var err error
+					texture.tex, err = gfx.newModelTexture(int32(img.Bounds().Max.X), int32(img.Bounds().Max.Y), 32, false)
+					if err != nil {
+						LogMessage("[VRAM] newModelTexture failed: %v", err)
+						return
+					}
 					texture.tex.SetDataG(rgba.Pix, mag, min, wrapS, wrapT)
 				}
 				textureMap[[2]int32{int32(*t.Source), int32(*t.Sampler)}] = texture
@@ -560,7 +562,12 @@ func loadglTFModel(filepath string) (*Model, error) {
 				rgba := image.NewRGBA(img.Bounds())
 				draw.Draw(rgba, img.Bounds(), img, img.Bounds().Min, draw.Src)
 				sys.mainThreadTask <- func() {
-					texture.tex = gfx.newModelTexture(int32(img.Bounds().Max.X), int32(img.Bounds().Max.Y), 32, false)
+					var err error
+					texture.tex, err = gfx.newModelTexture(int32(img.Bounds().Max.X), int32(img.Bounds().Max.Y), 32, false)
+					if err != nil {
+						LogMessage("[VRAM] newModelTexture failed: %v", err)
+						return
+					}
 					texture.tex.SetDataG(rgba.Pix, mag, min, wrapS, wrapT)
 				}
 				textureMap[[2]int32{int32(*t.Source), -1}] = texture
@@ -1175,7 +1182,11 @@ func loadglTFModel(filepath string) (*Model, error) {
 				primitive.morphTargetTexture = &GLTFTexture{}
 				sys.mainThreadTask <- func() {
 					dimension := int(math.Ceil(math.Pow(float64(8*primitive.numVertices), 0.5)))
-					primitive.morphTargetTexture.tex = gfx.newDataTexture(int32(dimension), int32(dimension))
+					var err error
+					primitive.morphTargetTexture.tex, err = gfx.newDataTexture(int32(dimension), int32(dimension))
+					if err != nil {
+						LogMessage("[VRAM] newDataTexture (morphTarget) failed: %v", err)
+					}
 					//primitive.morphTargetTexture.tex.SetPixelData(targetBuffer)
 				}
 			}
@@ -1430,7 +1441,12 @@ func loadglTFModel(filepath string) (*Model, error) {
 
 		skin.texture = &GLTFTexture{}
 		sys.mainThreadTask <- func() {
-			skin.texture.tex = gfx.newDataTexture(6, int32(len(skin.joints)))
+			tex, err := gfx.newDataTexture(6, int32(len(skin.joints)))
+			if err != nil {
+				LogMessage("[VRAM] failed to create skin texture: " + err.Error() + "\n")
+				return
+			}
+			skin.texture.tex = tex
 		}
 
 		mdl.skins = append(mdl.skins, skin)
@@ -1843,7 +1859,9 @@ func drawNode(mdl *Model, scene *Scene, layerNumber int, defaultLayerNumber int,
 		alpha = [2]int32{255, 0}
 	}
 
-	spfx := mdl.pfx.getFinalPalFx(blendMode, alpha)
+	// Apply BGPalFX, then AllPalFX
+	stackedPfx := mdl.pfx.withStacked(sys.bgPalFX, blendMode, alpha)
+	spfx := stackedPfx.getFinalPalFx(blendMode, alpha)
 
 	blendEq := BlendAdd
 	src := BlendOne
@@ -2699,12 +2717,12 @@ func (anim *GLTFAnimation) toggle(enabled bool) {
 	}
 }
 
-func (model *Model) step(turbo float32) {
+func (model *Model) step() {
 	for _, anim := range model.animations {
 		if anim.enabled == false {
 			continue
 		}
-		anim.time += turbo / 60
+		anim.time += 1.0 / 60.0
 		for anim.time >= anim.duration && anim.duration > 0 && (anim.loopCount < 0 || anim.loop < anim.loopCount) {
 			anim.time -= anim.duration
 			anim.loop += 1

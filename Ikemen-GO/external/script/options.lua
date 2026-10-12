@@ -176,6 +176,8 @@ options.t_itemname = {
 			local runtimeOS = getRuntimeOS()
 			if runtimeOS == 'android' then
 				modifyGameOption('Video.RenderMode', 'OpenGL ES 3.2')
+			elseif runtimeOS == 'ios' then
+				modifyGameOption('Video.RenderMode', 'Vulkan 1.3')
 			else
 				modifyGameOption('Video.RenderMode', "OpenGL 3.3")
 			end
@@ -208,15 +210,19 @@ options.t_itemname = {
 			modifyGameOption('Sound.BGMVolume', 80)
 			--modifyGameOption('Sound.MaxBGMVolume', 100)
 			modifyGameOption('Sound.AudioDucking', false)	
+			--modifyGameOption('Sound.BGMRAMBuffer', true)	
+			--modifyGameOption('Sound.AudioResampleQuality', 4)	
 			modifyGameOption('Arcade.AI.RandomColor', false)
 			modifyGameOption('Arcade.AI.SurvivalColor', true)
 			modifyGameOption('Arcade.AI.Ramping', true)
-			modifyGameOption('Netplay.ListenPort', 7500)
 			modifyGameOption('Netplay.RollbackNetcode', true)
+			modifyGameOption('Netplay.ListenPort', 7500)
+			modifyGameOption('Netplay.Rollback.Port', 7500)
 			modifyGameOption('Netplay.Rollback.FrameDelay', 2)
 			--modifyGameOption('Netplay.Rollback.DisconnectNotifyStart', 1000)
 			--modifyGameOption('Netplay.Rollback.DisconnectTimeout', 3000)
-			--modifyGameOption('Netplay.Rollback.LogsEnabled', false)
+			--modifyGameOption('Netplay.Rollback.StateLogsEnabled', false)
+			--modifyGameOption('Netplay.Rollback.GgpoLogsEnabled', false)
 			--modifyGameOption('Netplay.Rollback.SaveStageData', false)
 			--modifyGameOption('Netplay.Rollback.DesyncTest', false)
 			--modifyGameOption('Netplay.Rollback.DesyncTestFrames', false)
@@ -1237,7 +1243,21 @@ options.t_itemname = {
 		end
 		return true
 	end,
-	--Port Change
+	--Rollback Netcode
+	['netcode'] = function(t, item, cursorPosY, moveTxt)
+		if getInput(-1, motif.option_info.menu.add.key, motif.option_info.menu.subtract.key, motif.option_info.menu.done.key) then
+			sndPlay(motif.Snd, motif.option_info.cursor.move.snd[1], motif.option_info.cursor.move.snd[2])
+			if gameOption('Netplay.RollbackNetcode') then
+				modifyGameOption('Netplay.RollbackNetcode', false)
+			else
+				modifyGameOption('Netplay.RollbackNetcode', true)
+			end
+			t.items[item].vardisplay = options.t_vardisplay['netcode']()
+			options.modified = true
+		end
+		return true
+	end,
+	--Host Port (TCP)
 	['portchange'] = function(t, item, cursorPosY, moveTxt)
 		if getInput(-1, motif.option_info.menu.done.key) then
 			sndPlay(motif.Snd, motif.option_info.cursor.move.snd[1], motif.option_info.cursor.move.snd[2])
@@ -1259,17 +1279,25 @@ options.t_itemname = {
 		end
 		return true
 	end,
-	--Rollback Netcode
-	['netcode'] = function(t, item, cursorPosY, moveTxt)
-		if getInput(-1, motif.option_info.menu.add.key, motif.option_info.menu.subtract.key, motif.option_info.menu.done.key) then
+	--Rollback Port (UDP)
+	['rollbackport'] = function(t, item, cursorPosY, moveTxt)
+		if getInput(-1, motif.option_info.menu.done.key) then
 			sndPlay(motif.Snd, motif.option_info.cursor.move.snd[1], motif.option_info.cursor.move.snd[2])
-			if gameOption('Netplay.RollbackNetcode') then
-				modifyGameOption('Netplay.RollbackNetcode', false)
+			local port = tonumber(main.f_drawInput(
+				motif.option_info.textinput.TextSpriteData,
+				motif.option_info.textinput.text.port,
+				motif.option_info,
+				motif.optionbgdef,
+				motif.option_info.textinput.overlay.RectData
+			))
+			if port ~= nil and port == math.floor(port) and port >= 1 and port <= 65535 then
+				sndPlay(motif.Snd, motif.option_info.cursor.done.snd[1], motif.option_info.cursor.done.snd[2])
+				modifyGameOption('Netplay.Rollback.Port', port)
+				t.items[item].vardisplay = options.t_vardisplay['rollbackport']()
+				options.modified = true
 			else
-				modifyGameOption('Netplay.RollbackNetcode', true)
+				sndPlay(motif.Snd, motif.option_info.cancel.snd[1], motif.option_info.cancel.snd[2])
 			end
-			t.items[item].vardisplay = options.t_vardisplay['netcode']()
-			options.modified = true
 		end
 		return true
 	end,
@@ -1537,6 +1565,9 @@ options.t_vardisplay = {
 	['resolution'] = function()
 		return gameOption('Video.GameWidth') .. 'x' .. gameOption('Video.GameHeight')
 	end,
+	['rollbackport'] = function()
+		return gameOption('Netplay.Rollback.Port')
+	end,
 	['roundsnumsimul'] = function()
 		return gameOption('Options.Simul.Match.Wins')
 	end,
@@ -1789,7 +1820,9 @@ function options.f_start()
 	local runtimeOS = getRuntimeOS()
 	local excluded = {gles32 = true}
 	if runtimeOS == 'android' then
-		excluded = {keyboard = true, gl33 = true, vk13 = true}
+		excluded = {keyboard = true, gl33 = true}
+	elseif runtimeOS == 'ios' then
+		excluded = {keyboard = true, gl33 = true, gles32 = true}
 	end
 	main.f_pruneMenu(options.menu, excluded)
 	main.f_prunePointers(options.t_vardisplayPointers, excluded)

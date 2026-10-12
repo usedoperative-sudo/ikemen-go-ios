@@ -95,82 +95,6 @@ func userDataError(l *lua.LState, argi int, udtype interface{}) {
 	l.RaiseError("\nArgument %v is not a userdata of type: %T\n", argi, udtype)
 }
 
-// Converts a hitflag to a LString.
-// Previously in hitdefvar, moved here
-// for reusability in gethitvar
-func flagLStr(flag int32) lua.LString {
-	str := ""
-	if flag&int32(HF_H) != 0 {
-		str += "H"
-	}
-	if flag&int32(HF_L) != 0 {
-		str += "L"
-	}
-	if flag&int32(HF_A) != 0 {
-		str += "A"
-	}
-	if flag&int32(HF_F) != 0 {
-		str += "F"
-	}
-	if flag&int32(HF_D) != 0 {
-		str += "D"
-	}
-	if flag&int32(HF_P) != 0 {
-		str += "P"
-	}
-	if flag&int32(HF_MNS) != 0 {
-		str += "-"
-	}
-	if flag&int32(HF_PLS) != 0 {
-		str += "+"
-	}
-	return lua.LString(str)
-}
-
-// Converts an attr (statetype, attacktype) to a LString.
-// Used in gethitvar("attr.flag").
-func attrLStr(attr int32) lua.LString {
-	str := ""
-	if attr == 0 {
-		return lua.LString(str)
-	} // no attr? return an empty string
-	st := attr & int32(ST_MASK)  // state type
-	at := attr & ^int32(ST_MASK) // attack type (everything that's not statetype)
-	// flag1
-	if st&int32(ST_S) != 0 {
-		str += "S"
-	}
-	if st&int32(ST_C) != 0 {
-		str += "C"
-	}
-	if st&int32(ST_A) != 0 {
-		str += "A"
-	}
-	str += ", "
-	// first char
-	if at&int32(AT_AN) != 0 {
-		str += "N"
-	}
-	if at&int32(AT_AS) != 0 {
-		str += "S"
-	}
-	if at&int32(AT_AH) != 0 {
-		str += "H"
-	}
-	// second char
-	if at&int32(AT_AA) != 0 {
-		str += "A"
-	}
-	if at&int32(AT_AT) != 0 {
-		str += "T"
-	}
-	if at&int32(AT_AP) != 0 {
-		str += "P"
-	}
-
-	return lua.LString(str)
-}
-
 // Helper: flatten anonymous embedded structs into a parent table while
 // preserving Go struct field order.
 // Only applies to anonymous embedded fields without explicit `lua`/`ini` tags.
@@ -972,8 +896,7 @@ func systemScriptInit(l *lua.LState) {
 		@function addChar
 		@tparam string defpath Path to the character `.def` file (relative to `chars/` or absolute).
 		@tparam[opt] string params Optional comma-separated parameter string (from select.def)
-		@treturn boolean success `true` if the character was added successfully, `false` otherwise.
-		function addChar(defpath, params) end*/
+		@treturn boolean success `true` if the character was added successfully, `false` otherwise.*/
 		if sc := sys.sel.AddChar(strArg(l, 1)); sc != nil {
 			if !nilArg(l, 2) {
 				entries := SplitAndTrim(StripComment(strArg(l, 2)), ",")
@@ -1001,8 +924,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt=false] boolean debugOnly If `true`, the hotkey is treated as a debug key
 		  and only works when debug input is allowed.
 		@tparam string script Lua code to execute when the shortcut is pressed.
-		@treturn boolean success `true` if the shortcut was registered, `false` if the key name is invalid.
-		function addHotkey(key, ctrl, alt, shift, allowDuringPause, debugOnly, script) end*/
+		@treturn boolean success `true` if the shortcut was registered, `false` if the key name is invalid.*/
 		l.Push(lua.LBool(func() bool {
 			k := StringToKey(strArg(l, 1))
 			if k == KeyUnknown {
@@ -1019,8 +941,7 @@ func systemScriptInit(l *lua.LState) {
 		@function addStage
 		@tparam string defpath Path to the stage `.def` file (relative to `stages/` or absolute).
 		@tparam[opt] string params Optional comma-separated parameter string (from select.def)
-		@treturn boolean success `true` if the stage was added successfully, `false` otherwise.
-		function addStage(defpath, params) end*/
+		@treturn boolean success `true` if the stage was added successfully, `false` otherwise.*/
 		if ss, err := sys.sel.AddStage(strArg(l, 1)); err == nil {
 			if !nilArg(l, 2) {
 				entries := SplitAndTrim(StripComment(strArg(l, 2)), ",")
@@ -1042,8 +963,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animAddPos
 		@tparam Anim anim Animation userdata.
 		@tparam float32 dx Offset to add on the X axis.
-		@tparam float32 dy Offset to add on the Y axis.
-		function animAddPos(anim, dx, dy) end*/
+		@tparam float32 dy Offset to add on the Y axis.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1055,8 +975,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Copy velocity parameters from one animation to another.
 		@function animApplyVel
 		@tparam Anim target Target animation userdata to modify.
-		@tparam Anim source Source animation userdata whose velocity/accel settings are copied.
-		function animApplyVel(target, source) end*/
+		@tparam Anim source Source animation userdata whose velocity/accel settings are copied.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1075,8 +994,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animCopy
 		@tparam Anim anim Animation userdata.
 		@treturn Anim|nil copy New `Anim` userdata containing a copy of `anim`,
-		  or `nil` if `anim` is `nil`.
-		function animCopy(anim) end*/
+		  or `nil` if `anim` is `nil`.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1092,8 +1010,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Print debug information about an animation to the console.
 		@function animDebug
 		@tparam Anim anim Animation userdata.
-		@tparam[opt] string prefix Optional text prefix printed before the debug info.
-		function animDebug(anim, prefix) end*/
+		@tparam[opt] string prefix Optional text prefix printed before the debug info.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1114,8 +1031,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Queue drawing of an animation on a render layer.
 		@function animDraw
 		@tparam Anim anim Animation userdata.
-		@tparam[opt] int16 layer Render layer index; if omitted, the animation's own `layerno` is used.
-		function animDraw(anim, layer) end*/
+		@tparam[opt] int16 layer Render layer index; if omitted, the animation's own `layerno` is used.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1136,8 +1052,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animGetLength
 		@tparam Anim anim Animation userdata.
 		@treturn int32 length Effective animation length in ticks (as returned by `Anim.GetLength()`).
-		@treturn int32 totaltime Raw `totaltime` field from the underlying `Animation`.
-		function animGetLength(anim) end*/
+		@treturn int32 totaltime Raw `totaltime` field from the underlying `Animation`.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1161,8 +1076,7 @@ func systemScriptInit(l *lua.LState) {
 		  If `false` and the animation's `totaltime` equals `looptime`, convert it to an
 		  infinite loop (`totaltime = -1`, `looptime = 0`).
 		@treturn Anim|nil anim A new `Anim` userdata wrapping the preloaded animation,
-		  or `nil` if no matching animation exists.
-		function animGetPreloadedCharData(charRef, group, number, keepLoop) end*/
+		  or `nil` if no matching animation exists.*/
 		sys.sel.preloadMu.Lock()
 		ch := sys.sel.GetChar(int(numArg(l, 1)))
 		var anim *Animation
@@ -1193,8 +1107,7 @@ func systemScriptInit(l *lua.LState) {
 		  If `false` and the animation's `totaltime` equals `looptime`, convert it to an
 		  infinite loop (`totaltime = -1`, `looptime = 0`).
 		@treturn Anim|nil anim A new `Anim` userdata wrapping the preloaded animation,
-		  or `nil` if no matching animation exists.
-		function animGetPreloadedStageData(stageRef, group, number, keepLoop) end*/
+		  or `nil` if no matching animation exists.*/
 		sys.sel.preloadMu.Lock()
 		st := sys.sel.GetStage(int(numArg(l, 1)))
 		var anim *Animation
@@ -1227,8 +1140,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `Size` (uint16[2]) `{width, height}`
 		  - `Offset` (int16[2]) `{x, y}`
 		  - `palidx` (int) palette index used for this sprite,
-		  or `nil` if no sprite is available.
-		function animGetSpriteInfo(anim, group, number) end*/
+		  or `nil` if no sprite is available.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1266,8 +1178,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Load palettes for an animation's underlying sprite file, if palette usage is enabled.
 		@function animLoadPalettes
 		@tparam Anim anim Animation userdata.
-		@tparam int param Palette parameter passed to `loadActPalettes` (engine-specific semantics).
-		function animLoadPalettes(anim, param) end*/
+		@tparam int param Palette parameter passed to `loadActPalettes` (engine-specific semantics).*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1286,8 +1197,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam string|Animation actOrAnim Either:
 		  - a string definition of the animation to load, or
 		  - an `Animation` userdata (for example from `motif.AnimTable[...]`).
-		@treturn Anim anim Newly created animation userdata.
-		function animNew(sff, actOrAnim) end*/
+		@treturn Anim anim Newly created animation userdata.*/
 		s, ok := toUserData(l, 1).(*Sff)
 		if !ok {
 			s = newSff()
@@ -1333,8 +1243,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animPaletteGet
 		@tparam Anim anim Animation userdata.
 		@tparam int paletteId 1-based palette index.
-		@treturn table palette Array-like table where each entry is `{r, g, b, a}`.
-		function animPaletteGet(anim, paletteId) end*/
+		@treturn table palette Array-like table where each entry is `{r, g, b, a}`.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1360,8 +1269,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animPaletteSet
 		@tparam Anim anim Animation userdata.
 		@tparam int paletteId 1-based palette index.
-		@tparam table palette Array-like table where each entry is `{r, g, b, a}`.
-		function animPaletteSet(anim, paletteId, palette) end*/
+		@tparam table palette Array-like table where each entry is `{r, g, b, a}`.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1391,8 +1299,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam Anim anim Source animation userdata.
 		@tparam int32 charRef 0-based character index in the select list.
 		@treturn Anim preparedAnim Either a copy with adjusted palette data (when palette
-		  usage is enabled) or the original `anim` when palette handling is disabled.
-		function animPrepare(anim, charRef) end*/
+		  usage is enabled) or the original `anim` when palette handling is disabled.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1431,8 +1338,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `"scale"`: reset scale to the initial values
 		  - `"window"`: reset the clipping window to the initial value
 		  - `"velocity"`: reset velocity to the initial value
-		  - `"palfx"`: clear PalFX
-		function animReset(anim, parts) end*/
+		  - `"palfx"`: clear PalFX*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1478,8 +1384,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetAccel
 		@tparam Anim anim Animation userdata.
 		@tparam float32 ax Horizontal acceleration.
-		@tparam float32 ay Vertical acceleration.
-		function animSetAccel(anim, ax, ay) end*/
+		@tparam float32 ay Vertical acceleration.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1492,8 +1397,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetAlpha
 		@tparam Anim anim Animation userdata.
 		@tparam int16 src Source alpha factor (0–256, engine-specific).
-		@tparam int16 dst Destination alpha factor (0–256, engine-specific).
-		function animSetAlpha(anim, src, dst) end*/
+		@tparam int16 dst Destination alpha factor (0–256, engine-specific).*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1505,8 +1409,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set rotation angle for an animation.
 		@function animSetAngle
 		@tparam Anim anim Animation userdata.
-		@tparam float32 angle Rotation angle.
-		function animSetAngle(anim, angle) end*/
+		@tparam float32 angle Rotation angle.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1520,8 +1423,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam Anim anim Animation userdata to modify.
 		@tparam string|Animation actOrAnim Either:
 		  - a string definition of the animation to load, or
-		  - an `Animation` userdata (for example from `motif.AnimTable[...]`).
-		function animSetAnimation(anim, actOrAnim) end*/
+		  - an `Animation` userdata (for example from `motif.AnimTable[...]`).*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1579,8 +1481,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the color key (transparent index) used by an animation.
 		@function animSetColorKey
 		@tparam Anim anim Animation userdata.
-		@tparam int16 index Palette index used as the transparency key.
-		function animSetColorKey(anim, index) end*/
+		@tparam int16 index Palette index used as the transparency key.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1593,8 +1494,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetColorPalette
 		@tparam Anim anim Animation userdata.
 		@tparam int paletteId 1-based palette identifier to map to.
-		@treturn Anim anim The same animation userdata (for chaining).
-		function animSetColorPalette(anim, paletteId) end*/
+		@treturn Anim anim The same animation userdata (for chaining).*/
 		a, _ := toUserData(l, 1).(*Anim)
 		palNum := int(numArg(l, 2))
 		palIdx := a.anim.palettedata.SelectablePalIndex(palNum)
@@ -1617,8 +1517,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the facing (horizontal flip) of an animation.
 		@function animSetFacing
 		@tparam Anim anim Animation userdata.
-		@tparam float32 facing Facing multiplier, usually `1` or `-1`.
-		function animSetFacing(anim, facing) end*/
+		@tparam float32 facing Facing multiplier, usually `1` or `-1`.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1630,8 +1529,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set focal length used for perspective projection on an animation.
 		@function animSetFocalLength
 		@tparam Anim anim Animation userdata.
-		@tparam float32 fLength Focal length value.
-		function animSetFocalLength(anim, fLength) end*/
+		@tparam float32 fLength Focal length value.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1644,8 +1542,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetFriction
 		@tparam Anim anim Animation userdata.
 		@tparam float32 fx Horizontal friction.
-		@tparam float32 fy Vertical friction.
-		function animSetFriction(anim, fx, fy) end*/
+		@tparam float32 fy Vertical friction.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1658,8 +1555,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the render layer used by an animation.
 		@function animSetLayerno
 		@tparam Anim anim Animation userdata.
-		@tparam int16 layer Layer index to draw this animation on.
-		function animSetLayerno(anim, layer) end*/
+		@tparam int16 layer Layer index to draw this animation on.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1672,8 +1568,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetLocalcoord
 		@tparam Anim anim Animation userdata.
 		@tparam float32 width Local coordinate width.
-		@tparam float32 height Local coordinate height.
-		function animSetLocalcoord(anim, width, height) end*/
+		@tparam float32 height Local coordinate height.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1686,8 +1581,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetMaxDist
 		@tparam Anim anim Animation userdata.
 		@tparam float32 maxX Maximum horizontal distance.
-		@tparam float32 maxY Maximum vertical distance.
-		function animSetMaxDist(anim, maxX, maxY) end*/
+		@tparam float32 maxY Maximum vertical distance.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1710,8 +1604,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `invertall` (int32): set to `1` to invert all colors
 		  - `invertblend` (int32): invert blend mode index
 		  - `color` (float32): color saturation factor (`0–256` scaled to `0.0–1.0`)
-		  - `hue` (float32): hue adjustment factor (`0–256` scaled to `0.0–0.5`)
-		function animSetPalFX(anim, palfx) end*/
+		  - `hue` (float32): hue adjustment factor (`0–256` scaled to `0.0–0.5`)*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1826,8 +1719,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetPos
 		@tparam Anim anim Animation userdata.
 		@tparam[opt] float32 x New X position; if omitted, initial X offset is used.
-		@tparam[opt] float32 y New Y position; if omitted, initial Y offset is used.
-		function animSetPos(anim, x, y) end*/
+		@tparam[opt] float32 y New Y position; if omitted, initial Y offset is used.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1849,8 +1741,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int32|string projection Projection mode. Can be a numeric engine constant, or one of:
 		  - `"orthographic"`
 		  - `"perspective"`
-		  - `"perspective2"`
-		function animSetProjection(anim, projection) end*/
+		  - `"perspective2"`*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1877,8 +1768,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetScale
 		@tparam Anim anim Animation userdata.
 		@tparam float32 sx Horizontal scale factor.
-		@tparam float32 sy Vertical scale factor.
-		function animSetScale(anim, sx, sy) end*/
+		@tparam float32 sy Vertical scale factor.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1893,8 +1783,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam boolean tileX If `true`, tile horizontally.
 		@tparam boolean tileY If `true`, tile vertically.
 		@tparam[opt] int32 spacingX Horizontal tile spacing in pixels.
-		@tparam[opt] int32 spacingY Vertical tile spacing in pixels (defaults to `spacingX` if omitted).
-		function animSetTile(anim, tileX, tileY, spacingX, spacingY) end*/
+		@tparam[opt] int32 spacingY Vertical tile spacing in pixels (defaults to `spacingX` if omitted).*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1923,8 +1812,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animSetVelocity
 		@tparam Anim anim Animation userdata.
 		@tparam float32 vx Horizontal velocity.
-		@tparam float32 vy Vertical velocity.
-		function animSetVelocity(anim, vx, vy) end*/
+		@tparam float32 vy Vertical velocity.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1939,8 +1827,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam float32 x1 Left coordinate of the clipping window.
 		@tparam float32 y1 Top coordinate of the clipping window.
 		@tparam float32 x2 Right coordinate of the clipping window.
-		@tparam float32 y2 Bottom coordinate of the clipping window.
-		function animSetWindow(anim, x1, y1, x2, y2) end*/
+		@tparam float32 y2 Bottom coordinate of the clipping window.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1952,8 +1839,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set rotation angle around the X axis for an animation.
 		@function animSetXAngle
 		@tparam Anim anim Animation userdata.
-		@tparam float32 xangle X-axis rotation angle (engine-specific units, usually degrees).
-		function animSetXAngle(anim, xangle) end*/
+		@tparam float32 xangle X-axis rotation angle (engine-specific units, usually degrees).*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1965,8 +1851,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the X shear factor applied when drawing an animation.
 		@function animSetXShear
 		@tparam Anim anim Animation userdata.
-		@tparam float32 shear X shear factor.
-		function animSetXShear(anim, shear) end*/
+		@tparam float32 shear X shear factor.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1978,8 +1863,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set rotation angle around the Y axis for an animation.
 		@function animSetYAngle
 		@tparam Anim anim Animation userdata.
-		@tparam float32 yangle Y-axis rotation angle.
-		function animSetYAngle(anim, yangle) end*/
+		@tparam float32 yangle Y-axis rotation angle.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -1992,8 +1876,7 @@ func systemScriptInit(l *lua.LState) {
 		@function animUpdate
 		@tparam Anim anim Animation userdata.
 		@tparam[opt=false] boolean force If `true`, advance the animation even if it was
-		  already updated this frame.
-		function animUpdate(anim, force) end*/
+		  already updated this frame.*/
 		a, ok := toUserData(l, 1).(*Anim)
 		if !ok {
 			userDataError(l, 1, a)
@@ -2021,8 +1904,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `projection` (int32|string, optional) projection override; accepts a numeric
 		    engine constant or `"orthographic"`, `"perspective"`, `"perspective2"`
 		  - `focallength` (float32, optional) focal length override
-		  - `layerno` (int16, optional) layer override; defaults to `anim.layerno`
-		function batchDraw(batch) end*/
+		  - `layerno` (int16, optional) layer override; defaults to `anim.layerno`*/
 		tbl := l.ToTable(1)
 		if tbl == nil {
 			l.RaiseError("batchDraw requires a table as its first argument")
@@ -2116,8 +1998,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Print debug information about a background definition.
 		@function bgDebug
 		@tparam BGDef bg Background definition userdata.
-		@tparam[opt] string prefix Optional text prefix printed before the debug info.
-		function bgDebug(bg, prefix) end*/
+		@tparam[opt] string prefix Optional text prefix printed before the debug info.*/
 		bg, ok := toUserData(l, 1).(*BGDef)
 		if !ok {
 			userDataError(l, 1, bg)
@@ -2143,8 +2024,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt=0] int32 layer `0` for back layer, `1` for front layer.
 		@tparam[opt=0] float32 x Global X offset applied when drawing.
 		@tparam[opt=0] float32 y Global Y offset applied when drawing.
-		@tparam[opt=1.0] float32 scale Uniform global scale multiplier.
-		function bgDraw(bg, layer, x, y, scale) end*/
+		@tparam[opt=1.0] float32 scale Uniform global scale multiplier.*/
 		bg, ok := toUserData(l, 1).(*BGDef)
 		if !ok {
 			userDataError(l, 1, bg)
@@ -2185,8 +2065,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam string section Name or identifier of the background definition to load.
 		@tparam[opt] Model model Stage/model userdata associated with this background.
 		@tparam[opt=0] int32 defaultLayer Default layer index assigned to the background elements.
-		@treturn BGDef bg Loaded background definition userdata.
-		function bgNew(sff, defPath, section, model, defaultLayer) end*/
+		@treturn BGDef bg Loaded background definition userdata.*/
 		s, ok := toUserData(l, 1).(*Sff)
 		if !ok {
 			userDataError(l, 1, s)
@@ -2206,8 +2085,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "bgReset", func(*lua.LState) int {
 		/*Reset a background definition to its initial state.
 		@function bgReset
-		@tparam BGDef bg Background definition userdata.
-		function bgReset(bg) end*/
+		@tparam BGDef bg Background definition userdata.*/
 		bg, ok := toUserData(l, 1).(*BGDef)
 		if !ok {
 			userDataError(l, 1, bg)
@@ -2221,8 +2099,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int32 animNo Animation number to switch to.
 		@tparam[opt] int32 elem Optional animation element index to start from.
 		@tparam[opt=false] boolean ffx If `true`, use the `"f"` animation prefix (FFX animation).
-		@treturn boolean success `true` if the animation exists and was changed, `false` otherwise.
-		function changeAnim(animNo, elem, ffx) end*/
+		@treturn boolean success `true` if the animation exists and was changed, `false` otherwise.*/
 		an := int32(numArg(l, 1))
 		c := sys.chars[sys.debugWC.playerNo]
 		if c[0].selfAnimExist(BytecodeInt(an)) == BytecodeBool(true) {
@@ -2249,8 +2126,7 @@ func systemScriptInit(l *lua.LState) {
 		@function changeState
 		@tparam int32 stateNo State number to switch to, or `-1` to disable the character.
 		@treturn boolean success `true` if an existing state was entered, `false` otherwise.
-		  Passing `-1` disables the character and returns `false`.
-		function changeState(stateNo) end*/
+		  Passing `-1` disables the character and returns `false`.*/
 		st := int32(numArg(l, 1))
 		c := sys.chars[sys.debugWC.playerNo]
 		if st == -1 {
@@ -2272,8 +2148,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "clear", func(*lua.LState) int {
 		/*Clear all characters' clipboard text buffers.
-		@function clear
-		function clear() end*/
+		@function clear*/
 		for _, p := range sys.chars {
 			for _, c := range p {
 				//for i := range c.clipboardText {
@@ -2286,8 +2161,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "clearAllSound", func(l *lua.LState) int {
 		/*Stop all currently playing sounds.
-		@function clearAllSound
-		function clearAllSound() end*/
+		@function clearAllSound*/
 		sys.clearAllSound()
 		return 0
 	})
@@ -2297,8 +2171,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int32 r Red component (0–255).
 		@tparam int32 g Green component (0–255).
 		@tparam int32 b Blue component (0–255).
-		@tparam[opt=255] int32 alpha Alpha value (0–255); `255` is fully opaque.
-		function clearColor(r, g, b, alpha) end*/
+		@tparam[opt=255] int32 alpha Alpha value (0–255); `255` is fully opaque.*/
 		alpha := int32(255)
 		if !nilArg(l, 4) {
 			alpha = int32(numArg(l, 4))
@@ -2315,15 +2188,13 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "clearConsole", func(*lua.LState) int {
 		/*Clear text printed to the in-engine console.
-		@function clearConsole
-		function clearConsole() end*/
+		@function clearConsole*/
 		sys.consoleText = nil
 		return 0
 	})
 	luaRegister(l, "clearSelected", func(l *lua.LState) int {
 		/*Clear all current select-screen choices (characters, stages, music, game params).
-		@function clearSelected
-		function clearSelected() end*/
+		@function clearSelected*/
 		sys.sel.ClearSelected()
 		return 0
 	})
@@ -2336,8 +2207,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt] int32 bufferTime Buffer time in ticks.
 		@tparam[opt] boolean bufferHitpause Whether inputs are buffered during hitpause.
 		@tparam[opt] boolean bufferPauseend Whether inputs are buffered during pause end.
-		@tparam[opt] int32 stepTime Step granularity in ticks.
-		function commandAdd(name, command, time, bufferTime, bufferHitpause, bufferPauseend, stepTime) end*/
+		@tparam[opt] int32 stepTime Step granularity in ticks.*/
 		name := strArg(l, 1)
 		cmdstr := strArg(l, 2)
 		dcl := (*CommandList)(nil)
@@ -2386,8 +2256,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "commandBufReset", func(l *lua.LState) int {
 		/*Reset command input buffers.
 		@function commandBufReset
-		@tparam[opt] int playerNo 1-based player/controller index. If omitted, all command buffers are reset.
-		function commandBufReset(playerNo) end*/
+		@tparam[opt] int playerNo 1-based player/controller index. If omitted, all command buffers are reset.*/
 		if nilArg(l, 1) {
 			for _, cl := range sys.commandLists {
 				if cl == nil {
@@ -2407,8 +2276,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Print debug information about a command list.
 		@function commandDebug
 		@tparam int playerNo 1-based player/controller index.
-		@tparam[opt] string prefix Optional text prefix printed before the debug info.
-		function commandDebug(playerNo, prefix) end*/
+		@tparam[opt] string prefix Optional text prefix printed before the debug info.*/
 		pn := int(numArg(l, 1))
 		if pn < 1 || pn > len(sys.commandLists) || sys.commandLists[pn-1] == nil {
 			return 0
@@ -2452,8 +2320,7 @@ func systemScriptInit(l *lua.LState) {
 		@function commandGetState
 		@tparam int playerNo 1-based player/controller index.
 		@tparam string name Command name to query.
-		@treturn boolean active `true` if the command is currently active, `false` otherwise.
-		function commandGetState(playerNo, name) end*/
+		@treturn boolean active `true` if the command is currently active, `false` otherwise.*/
 		pn := int(numArg(l, 1))
 		if pn < 1 || pn > len(sys.commandLists) || sys.commandLists[pn-1] == nil {
 			l.Push(lua.LBool(false))
@@ -2467,8 +2334,7 @@ func systemScriptInit(l *lua.LState) {
 		@function computeRanking
 		@tparam string mode Ranking mode identifier.
 		@treturn boolean cleared `true` if the run cleared the mode's requirements.
-		@treturn int32 place Ranking position (1-based), or `0` if unranked / skipped / not visible.
-		function computeRanking(mode) end*/
+		@treturn int32 place Ranking position (1-based), or `0` if unranked / skipped / not visible.*/
 		mode := strArg(l, 1)
 		cleared, place := computeAndSaveRanking(mode)
 		l.Push(lua.LBool(cleared))
@@ -2478,23 +2344,20 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "connected", func(*lua.LState) int {
 		/*Check if the main menu network connection is established.
 		@function connected
-		@treturn boolean connected `true` if connected to a netplay peer, `false` otherwise.
-		function connected() end*/
+		@treturn boolean connected `true` if connected to a netplay peer, `false` otherwise.*/
 		l.Push(lua.LBool(sys.netConnection != nil && sys.netConnection.IsConnected())) // No need to check rollback here as this deals with the main menu connection
 		return 1
 	})
 	luaRegister(l, "continued", func(*lua.LState) int {
 		/*Check whether the current run used a continue.
 		@function continued
-		@treturn boolean continued `true` if the continue flag is set.
-		function continued() end*/
+		@treturn boolean continued `true` if the continue flag is set.*/
 		l.Push(lua.LBool(sys.continueFlg))
 		return 1
 	})
 	luaRegister(l, "endMatch", func(*lua.LState) int {
 		/*Signal that the current match should end (using fight screen fade-out settings).
-		@function endMatch
-		function endMatch() end*/
+		@function endMatch*/
 		sys.fightScreen.round.fadeOut.init(sys.fightScreen.round.fadeOut, false)
 		sys.uiResetTokenGuard()
 		sys.endMatch = true
@@ -2504,8 +2367,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Enter netplay as client or host.
 		@function enterNetPlay
 		@tparam string host Host address (IP or hostname). If an empty string, listen
-		  for an incoming connection; otherwise connect to the given host.
-		function enterNetPlay(host) end*/
+		  for an incoming connection; otherwise connect to the given host.*/
 		if sys.netConnection != nil {
 			l.RaiseError("\nConnection already established.\n")
 		}
@@ -2539,8 +2401,7 @@ func systemScriptInit(l *lua.LState) {
 		@function enterReplay
 		@tparam string path Path to the replay file.
 		@treturn boolean success `true` if the replay file was opened and playback started,
-		  `false` otherwise.
-		function enterReplay(path) end*/
+		  `false` otherwise.*/
 		sys.sessionWarning = ""
 		sys.chars = [len(sys.chars)][]*Char{}
 		sys.replayFile = OpenReplayFile(strArg(l, 1))
@@ -2564,8 +2425,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get or set the global escape flag.
 		@function esc
 		@tparam[opt] boolean value If provided, sets the escape flag.
-		@treturn boolean esc Current value of the escape flag.
-		function esc(value) end*/
+		@treturn boolean esc Current value of the escape flag.*/
 		if !nilArg(l, 1) {
 			sys.esc = boolArg(l, 1)
 		}
@@ -2574,8 +2434,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "exitNetPlay", func(*lua.LState) int {
 		/*Exit netplay mode and close any active netplay connection.
-		@function exitNetPlay
-		function exitNetPlay() end*/
+		@function exitNetPlay*/
 		if err := sys.endSyncSessionOverride(); err != nil {
 			l.RaiseError(err.Error())
 		}
@@ -2593,8 +2452,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "exitReplay", func(*lua.LState) int {
 		/*Exit replay mode and restore normal video settings.
-		@function exitReplay
-		function exitReplay() end*/
+		@function exitReplay*/
 		if err := sys.endSyncSessionOverride(); err != nil {
 			l.RaiseError(err.Error())
 		}
@@ -2613,8 +2471,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `color` (int[3], opt) RGB values (0–255)
 		  - `anim` (*Anim, opt) Animation to play in the fade. If nil or invalid, will play no animation
 		  - `sound` (int[2], opt) Sound to play in the fade. Uses motif SND.
-		@treturn Fade fade Fade userdata.
-		function fadeNew(params) end*/
+		@treturn Fade fade Fade userdata.*/
 		f := newFade()
 
 		// if no table return the Fade as is
@@ -2669,16 +2526,14 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "fadeActive", func(*lua.LState) int {
 		/*Check whether any global motif fade is active.
 		@function fadeActive
-		@treturn boolean active `true` if fade-in or fade-out is currently running.
-		function fadeActive() end*/
+		@treturn boolean active `true` if fade-in or fade-out is currently running.*/
 		l.Push(lua.LBool(sys.motif.fadeOut.isFading() || sys.motif.fadeIn.isFading()))
 		return 1
 	})
 	luaRegister(l, "fadeInInit", func(*lua.LState) int {
 		/*Initialize a `Fade` object using motif fade-in settings.
 		@function fadeInInit
-		@tparam Fade fade Fade userdata to initialize.
-		function fadeInInit(fade) end*/
+		@tparam Fade fade Fade userdata to initialize.*/
 		f, ok := toUserData(l, 1).(*Fade)
 		if !ok {
 			userDataError(l, 1, f)
@@ -2690,8 +2545,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "fadeOutInit", func(*lua.LState) int {
 		/*Initialize a `Fade` object using motif fade-out settings.
 		@function fadeOutInit
-		@tparam Fade fade Fade userdata to initialize.
-		function fadeOutInit(fade) end*/
+		@tparam Fade fade Fade userdata to initialize.*/
 		f, ok := toUserData(l, 1).(*Fade)
 		if !ok {
 			userDataError(l, 1, f)
@@ -2702,8 +2556,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "fadeSkip", func(*lua.LState) int {
 		/*Immediately stop any running global motif fade.
-		@function fadeSkip
-		function fadeSkip() end*/
+		@function fadeSkip*/
 		sys.motif.fadeIn.reset()
 		sys.motif.fadeOut.reset()
 		return 0
@@ -2712,8 +2565,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Test whether a file exists, after engine path resolution.
 		@function fileExists
 		@tparam string path File path to test (relative or absolute).
-		@treturn boolean exists `true` if the file exists, `false` otherwise.
-		function fileExists(path) end*/
+		@treturn boolean exists `true` if the file exists, `false` otherwise.*/
 		path := strArg(l, 1)
 		l.Push(lua.LBool(FileExist(path) != ""))
 		return 1
@@ -2721,8 +2573,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "findEntityByName", func(*lua.LState) int {
 		/*Find the next entity whose name contains the given text.
 		@function findEntityByName
-		@tparam string text Case-insensitive substring to search in entity names.
-		function findEntityByName(text) end*/
+		@tparam string text Case-insensitive substring to search in entity names.*/
 		if !sys.debugModeAllowed() {
 			return 0
 		}
@@ -2794,8 +2645,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "findEntityByPlayerId", func(*lua.LState) int {
 		/*Find the next entity with the given player ID.
 		@function findEntityByPlayerId
-		@tparam int32 playerId Target entity `id` to search for.
-		function findEntityByPlayerId(playerId) end*/
+		@tparam int32 playerId Target entity `id` to search for.*/
 		if !sys.debugModeAllowed() {
 			return 0
 		}
@@ -2863,8 +2713,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "findHelperById", func(*lua.LState) int {
 		/*Find the next helper with the given helper ID.
 		@function findHelperById
-		@tparam int32 helperId Target helper `helperId` to search for.
-		function findHelperById(helperId) end*/
+		@tparam int32 helperId Target helper `helperId` to search for.*/
 		if !sys.debugModeAllowed() {
 			return 0
 		}
@@ -2936,8 +2785,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `Type` (string) font type identifier
 		  - `Size` (uint16[2]) `{width, height}` in pixels
 		  - `Spacing` (int32[2]) `{x, y}` spacing in pixels
-		  - `offset` (int32[2]) `{x, y}` base drawing offset
-		function fontGetDef(font) end*/
+		  - `offset` (int32[2]) `{x, y}` base drawing offset*/
 		fnt, ok := toUserData(l, 1).(*Fnt)
 		if !ok {
 			userDataError(l, 1, fnt)
@@ -2964,8 +2812,7 @@ func systemScriptInit(l *lua.LState) {
 		@function fontNew
 		@tparam string filename Font filename (searched in `font/`, motif folder, current dir, `data/`).
 		@tparam[opt=-1] int32 height Override font height; `-1` uses the height defined in the font file.
-		@treturn Fnt font Loaded font userdata. If loading fails, a fallback font is returned.
-		function fontNew(filename, height) end*/
+		@treturn Fnt font Loaded font userdata. If loading fails, a fallback font is returned.*/
 		var height int32 = -1
 		if !nilArg(l, 2) {
 			height = int32(numArg(l, 2))
@@ -2981,8 +2828,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "frameStep", func(*lua.LState) int {
 		/*Enable single-frame stepping mode.
-		@function frameStep
-		function frameStep() end*/
+		@function frameStep*/
 		sys.frameStepFlag = true
 		return 0
 	})
@@ -2990,8 +2836,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Execute a full match using the current configuration.
 		@function game
 		@treturn int32 winSide Winning side index (`1` or `2`), `0` for draw, `-1` if the game was ended externally.
-		@treturn[opt] int controllerNo 1-based controller index of the challenger player interrupting `arcade` mode.
-		function game() end*/
+		@treturn[opt] int controllerNo 1-based controller index of the challenger player interrupting `arcade` mode.*/
 		defer func() {
 			if sys.loader.state == LS_Loading {
 				sys.loader.reset()
@@ -3009,10 +2854,18 @@ func systemScriptInit(l *lua.LState) {
 		// Synchronize timing to prevent speed fluctuations when changing FPS (entering matches)
 		sys.resetFrameTime()
 
-		load := func() error {
+		load := func(allowRetry bool) error {
 			sys.loader.runTread()
 			for sys.loader.state != LS_Complete {
 				if sys.loader.state == LS_Error {
+					// Let users fix the file and retry without exiting Ikemen
+					// Not in netplay (would desync) or for TurnsLoading background preloads
+					if allowRetry && sys.cfg.Debug.RetryLoadOnError && sys.loader.err != nil && !sys.netplay() && !sys.turnsPreloadActive() &&
+						ShowRetryDialog(retryLoadMessage(sys.loader.err)) {
+						sys.loader.retryAfterError()
+						sys.loader.runTread()
+						continue
+					}
 					return sys.loader.err
 				} else if sys.loader.state == LS_Cancel {
 					return nil
@@ -3050,7 +2903,7 @@ func systemScriptInit(l *lua.LState) {
 				}
 
 				// Load characters and stage
-				if err := load(); err != nil {
+				if err := load(true); err != nil {
 					return -1, err
 				}
 				if sys.loader.state == LS_Cancel {
@@ -3090,17 +2943,16 @@ func systemScriptInit(l *lua.LState) {
 
 				for i, c := range sys.chars {
 					if len(c) > 0 {
-						// Skip BG-loaded Turns mode chars so CharList bookkeeping doesn't try to replace nonexistent entries on later rounds.
-						if sys.cfg.Config.TurnsLoading && sys.tmode[i&1] == TM_Turns && c[0].teamside == -1 {
-							continue
-						}
 						// Add or replace in charList
 						if sys.roundNo == 1 {
 							sys.charList.add(c[0])
 						} else if c[0].roundsExisted() == 0 {
 							// BG-loaded Turns switching updates CharList inside activateNextTurnsFighters().
-							if !(sys.cfg.Config.TurnsLoading && sys.tmode[i&1] == TM_Turns) && !sys.charList.replace(c[0], i, 0) {
-								panic(fmt.Errorf("failed to replace player: %v", i))
+							if !(sys.cfg.Config.TurnsLoading && sys.tmode[i&1] == TM_Turns) {
+								// Wipe the outgoing root and its helpers from CharList, then add the incoming root
+								// This is safer than the old replace()
+								sys.removePlayerFromCharList(i)
+								sys.charList.add(c[0])
 							}
 						}
 
@@ -3120,6 +2972,9 @@ func systemScriptInit(l *lua.LState) {
 						}
 					}
 				}
+
+				// Verify CharList still matches sys.chars after the previous block
+				sys.charList.audit()
 
 				// If first round
 				if sys.roundNo == 1 {
@@ -3235,7 +3090,7 @@ func systemScriptInit(l *lua.LState) {
 					// The next Turns member is loaded in the background during the previous round.
 					// If the round ended before that load finished, wait here before promotion.
 					if sys.loader.state != LS_NotYet && sys.loader.state != LS_Complete {
-						if err := load(); err != nil {
+						if err := load(false); err != nil { // Never retry loading
 							l.RaiseError(err.Error())
 						}
 					}
@@ -3257,7 +3112,6 @@ func systemScriptInit(l *lua.LState) {
 					sys.statsLog.finalizeMatch()
 				}
 				// Cleanup
-				sys.restorePauseVolume()
 				sys.timerStart = 0
 				sys.timerRounds = []int32{}
 				sys.scoreStart = [2]float32{}
@@ -3273,6 +3127,7 @@ func systemScriptInit(l *lua.LState) {
 					sys.bgm.Stop()
 					sys.playBgmFlg = false
 				}
+				sys.matchStoryboards.destroy()
 				sys.clearMatchSound()
 				sys.allPalFX = newPalFX()
 				sys.bgPalFX = newPalFX()
@@ -3304,24 +3159,21 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "gameRunning", func(l *lua.LState) int {
 		/*Check whether a match is currently running.
 		@function gameRunning
-		@treturn boolean running `true` if gameplay is currently active.
-		function gameRunning() end*/
+		@treturn boolean running `true` if gameplay is currently active.*/
 		l.Push(lua.LBool(sys.gameRunning))
 		return 1
 	})
 	luaRegister(l, "getAnimElemCount", func(*lua.LState) int {
 		/*[redirectable] Get the character's number of elements in the animation.
 		@function getAnimElemCount
-		@treturn int count Number of animation elements.
-		function getAnimElemCount() end*/
+		@treturn int count Number of animation elements.*/
 		l.Push(lua.LNumber(len(sys.debugWC.anim.frames)))
 		return 1
 	})
 	luaRegister(l, "getAnimTimeSum", func(*lua.LState) int {
 		/*[redirectable] Get the character's current accumulated time of the animation.
 		@function getAnimTimeSum
-		@treturn int32 timeSum Current animation time value.
-		function getAnimTimeSum() end*/
+		@treturn int32 timeSum Current animation time value.*/
 		l.Push(lua.LNumber(sys.debugWC.anim.curtime))
 		return 1
 	})
@@ -3334,8 +3186,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `name` (string) character display name (or internal name as fallback)
 		  - `def` (string) resolved `.def` path
 		  - `sound` (string) sound file path from the `[Files]` section,
-		  or `nil` if the `.def` file cannot be resolved.
-		function getCharAttachedInfo(def) end*/
+		  or `nil` if the `.def` file cannot be resolved.*/
 		def := strArg(l, 1)
 		idx := strings.Index(def, "/")
 		if len(def) >= 4 && strings.ToLower(def[len(def)-4:]) == ".def" {
@@ -3393,8 +3244,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get the definition file path for a character slot.
 		@function getCharFileName
 		@tparam int charRef 0-based character index in the select list.
-		@treturn string defPath Resolved `.def` path for this slot.
-		function getCharFileName(charRef) end*/
+		@treturn string defPath Resolved `.def` path for this slot.*/
 		c := sys.sel.GetChar(int(numArg(l, 1)))
 		l.Push(lua.LString(c.def))
 		return 1
@@ -3416,8 +3266,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `cns_scale` (float32[]) scale values from the CNS configuration
 		  - `pal` (int32[]) available palette numbers (at least `{1}`)
 		  - `pal_defaults` (int32[]) default palette numbers (at least `{1}`)
-		  - `pal_keymap` (table) palette key remaps, indexed by original palette slot
-		function getCharInfo(charRef) end*/
+		  - `pal_keymap` (table) palette key remaps, indexed by original palette slot*/
 		c := sys.sel.GetChar(int(numArg(l, 1)))
 		tbl := l.NewTable()
 		tbl.RawSetString("name", lua.LString(c.name))
@@ -3478,8 +3327,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get the display name of a character slot.
 		@function getCharName
 		@tparam int charRef 0-based character index in the select list.
-		@treturn string name Character display name.
-		function getCharName(charRef) end*/
+		@treturn string name Character display name.*/
 		c := sys.sel.GetChar(int(numArg(l, 1)))
 		l.Push(lua.LString(c.name))
 		return 1
@@ -3488,8 +3336,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Query the background preload state of a character slot.
 		@function getCharPreloadStatus
 		@tparam int charRef 0-based character index in the select list.
-		@treturn string state Preload state: `"idle"`, `"queued"`, `"loading"`, or `"ready"`.
-		function getCharPreloadStatus(charRef) end*/
+		@treturn string state Preload state: `"idle"`, `"queued"`, `"loading"`, or `"ready"`.*/
 		state := sys.sel.CharPreloadStatus(int(numArg(l, 1)))
 		l.Push(lua.LString(state.String()))
 		return 1
@@ -3498,8 +3345,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get a random valid palette number for a character slot.
 		@function getCharRandomPalette
 		@tparam int charRef 0-based character index in the select list.
-		@treturn int32 palNo Palette number; defaults to `1` if the character has no palette list.
-		function getCharRandomPalette(charRef) end*/
+		@treturn int32 palNo Palette number; defaults to `1` if the character has no palette list.*/
 		c := sys.sel.GetChar(int(numArg(l, 1)))
 		if len(c.pal) > 0 {
 			idx := int(RandI(0, int32(len(c.pal)-1)))
@@ -3513,8 +3359,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get parsed select parameters for a character entry.
 		@function getCharSelectParams
 		@tparam int charRef 0-based character index in the select list.
-		@treturn table params Lua table created from the comma-separated `params` string passed to `addChar()`.
-		function getCharSelectParams(charRef) end*/
+		@treturn table params Lua table created from the comma-separated `params` string passed to `addChar()`.*/
 		c := sys.sel.GetChar(int(numArg(l, 1)))
 		lv := toLValue(l, c.scp)
 		lTable, ok := lv.(*lua.LTable)
@@ -3528,8 +3373,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getClipboardString", func(*lua.LState) int {
 		/*Get the current system clipboard string.
 		@function getClipboardString
-		@treturn string text Clipboard contents, or an empty string if unavailable.
-		function getClipboardString() end*/
+		@treturn string text Clipboard contents, or an empty string if unavailable.*/
 		s := sys.window.GetClipboardString()
 		l.Push(lua.LString(s))
 		return 1
@@ -3537,8 +3381,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getCommandLineFlags", func(*lua.LState) int {
 		/*Get all command-line flags passed to the engine.
 		@function getCommandLineFlags
-		@treturn table flags A table mapping raw flag keys to their values (string).
-		function getCommandLineFlags() end*/
+		@treturn table flags A table mapping raw flag keys to their values (string).*/
 		tbl := l.NewTable()
 		for k, v := range sys.cmdFlags {
 			tbl.RawSetString(k, lua.LString(v))
@@ -3551,8 +3394,7 @@ func systemScriptInit(l *lua.LState) {
 		@function getCommandLineValue
 		@tparam string flagName Exact flag key as stored in `sys.cmdFlags`
 		@treturn string|nil value Value associated with the flag,
-		  or `nil` if the flag is not present.
-		function getCommandLineValue(flagName) end*/
+		  or `nil` if the flag is not present.*/
 		if _, ok := sys.cmdFlags[strArg(l, 1)]; !ok {
 			return 0
 		}
@@ -3563,8 +3405,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get the number of consecutive wins for a team.
 		@function getConsecutiveWins
 		@tparam int teamSide Team side (`1` or `2`).
-		@treturn int32 wins Number of consecutive wins for the given side.
-		function getConsecutiveWins(teamSide) end*/
+		@treturn int32 wins Number of consecutive wins for the given side.*/
 		tn := int(numArg(l, 1))
 		if tn < 1 || tn > 2 {
 			l.RaiseError("\nInvalid team side: %v\n", tn)
@@ -3575,8 +3416,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getCredits", func(*lua.LState) int {
 		/*Get the current credit count.
 		@function getCredits
-		@treturn int32 credits Current number of credits.
-		function getCredits() end*/
+		@treturn int32 credits Current number of credits.*/
 		l.Push(lua.LNumber(sys.credits))
 		return 1
 	})
@@ -3584,8 +3424,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Recursively list all paths under a directory.
 		@function getDirectoryFiles
 		@tparam string rootPath Starting directory path.
-		@treturn table paths Array-like table of visited paths (files and directories).
-		function getDirectoryFiles(rootPath) end*/
+		@treturn table paths Array-like table of visited paths (files and directories).*/
 		dir := l.NewTable()
 		filepath.Walk(strArg(l, 1), func(path string, info os.FileInfo, err error) error {
 			dir.Append(lua.LString(path))
@@ -3597,24 +3436,21 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getFrameCount", func(l *lua.LState) int {
 		/*Get the global frame counter value.
 		@function getFrameCount
-		@treturn int32 frameCount Number of frames elapsed since engine start.
-		function getFrameCount() end*/
+		@treturn int32 frameCount Number of frames elapsed since engine start.*/
 		l.Push(lua.LNumber(sys.frameCounter))
 		return 1
 	})
 	luaRegister(l, "getGameFPS", func(*lua.LState) int {
 		/*Get the current measured gameplay FPS.
 		@function getGameFPS
-		@treturn float32 fps Current gameplay frames per second.
-		function getGameFPS() end*/
+		@treturn float32 fps Current gameplay frames per second.*/
 		l.Push(lua.LNumber(sys.gameFPS))
 		return 1
 	})
 	luaRegister(l, "getGameParams", func(*lua.LState) int {
 		/*Get the current game parameter table.
 		@function getGameParams
-		@treturn table params Current game parameters as a Lua table.
-		function getGameParams() end*/
+		@treturn table params Current game parameters as a Lua table.*/
 		lv := toLValue(l, sys.sel.gameParams)
 		lTable, ok := lv.(*lua.LTable)
 		if !ok {
@@ -3627,24 +3463,21 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getGameSpeed", func(*lua.LState) int {
 		/*Get the current game logic speed as a percentage.
 		@function getGameSpeed
-		@treturn int32 speedPercent Integer game logic speed relative to `60 FPS` (`100` = normal speed).
-		function getGameSpeed() end*/
+		@treturn int32 speedPercent Integer game logic speed relative to `60 FPS` (`100` = normal speed).*/
 		l.Push(lua.LNumber(100 * sys.gameLogicSpeed() / 60))
 		return 1
 	})
 	luaRegister(l, "getGameStats", func(*lua.LState) int {
 		/*Read accumulated game statistics.
 		@function getGameStats
-		@treturn table stats Statistics log object as a Lua table.
-		function getGameStats() end*/
+		@treturn table stats Statistics log object as a Lua table.*/
 		l.Push(toLValue(l, sys.statsLog))
 		return 1
 	})
 	luaRegister(l, "getGameStatsJson", func(l *lua.LState) int {
 		/*Get a JSON snapshot of accumulated game statistics.
 		@function getGameStatsJson
-		@treturn string json JSON-encoded snapshot containing stats and related flags.
-		function getGameStatsJson() end*/
+		@treturn string json JSON-encoded snapshot containing stats and related flags.*/
 		s := GameStatsSnapshot{
 			StatsLog:          sys.statsLog,
 			ContinueFlg:       sys.continueFlg,
@@ -3664,8 +3497,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam number|table players 1-based player/controller index, or an array-like table of indexes.
 		  Passing `-1` checks all players.
 		@tparam string|table ... One or more key/button tokens, or array-like tables of tokens.
-		@treturn boolean pressed `true` if any provided token set is active for any selected player.
-		function getInput(players, ...) end*/
+		@treturn boolean pressed `true` if any provided token set is active for any selected player.*/
 		var players []int
 		// Collect player numbers (1-based) from arg #1
 		switch v := l.Get(1).(type) {
@@ -3732,8 +3564,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam number|table players 1-based player/controller index, or an array-like table of indexes.
 		  Passing `-1` checks all players.
 		@tparam string|table ... One or more key/button tokens, or array-like tables of tokens.
-		@treturn int32 time Hold time in ticks for the first active token found, or `0` if none are active.
-		function getInputTime(players, ...) end*/
+		@treturn int32 time Hold time in ticks for the first active token found, or `0` if none are active.*/
 		var players []int
 		switch v := l.Get(1).(type) {
 		case *lua.LTable:
@@ -3887,8 +3718,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get a joystick's GUID string.
 		@function getJoystickGUID
 		@tparam int index Joystick index (0-based).
-		@treturn string guid GUID string for the joystick, or an empty string if invalid.
-		function getJoystickGUID(index) end*/
+		@treturn string guid GUID string for the joystick, or an empty string if invalid.*/
 		l.Push(lua.LString(input.GetJoystickGUID(int(numArg(l, 1)))))
 		return 1
 	})
@@ -3897,8 +3727,7 @@ func systemScriptInit(l *lua.LState) {
 		@function getJoystickKey
 		@tparam[opt] int controllerIdx Joystick index (0-based). If omitted, listens on any joystick.
 		@treturn string keyName Engine key string for the pressed control (empty string if none).
-		@treturn int joystickIndex 1-based joystick index that generated the input; `-1` if no input.
-		function getJoystickKey(controllerIdx) end*/
+		@treturn int joystickIndex 1-based joystick index that generated the input; `-1` if no input.*/
 		controllerIdx := -1
 		if !nilArg(l, 1) {
 			max := input.GetMaxJoystickCount()
@@ -3919,8 +3748,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get a joystick's display name.
 		@function getJoystickName
 		@tparam int index Joystick index (0-based).
-		@treturn string name Human-readable joystick name, or an empty string if invalid.
-		function getJoystickName(index) end*/
+		@treturn string name Human-readable joystick name, or an empty string if invalid.*/
 		l.Push(lua.LString(input.GetJoystickName(int(numArg(l, 1)))))
 		return 1
 	})
@@ -3928,8 +3756,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Check whether a joystick is present.
 		@function getJoystickPresent
 		@tparam int index Joystick index (0-based).
-		@treturn boolean present `true` if the joystick is connected, `false` otherwise.
-		function getJoystickPresent(index) end*/
+		@treturn boolean present `true` if the joystick is connected, `false` otherwise.*/
 		l.Push(lua.LBool(input.IsJoystickPresent(int(numArg(l, 1)))))
 		return 1
 	})
@@ -3939,8 +3766,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt] string key If omitted, the last key name is returned. If a non-empty string
 		  is given, returns whether it matches the last key. If an empty string is given,
 		  always returns `false`.
-		@treturn string|boolean result Last key name when called without arguments, or a boolean match result when `key` is provided.
-		function getKey(key) end*/
+		@treturn string|boolean result Last key name when called without arguments, or a boolean match result when `key` is provided.*/
 		var s string
 		if sys.keyInput != KeyUnknown {
 			s = KeyToString(sys.keyInput)
@@ -3961,8 +3787,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get the last input text associated with the current key event.
 		@function getKeyText
 		@treturn string text If the last key was Insert, returns the clipboard contents,
-		  otherwise returns the textual representation of the last key press. Empty string if none.
-		function getKeyText() end*/
+		  otherwise returns the textual representation of the last key press. Empty string if none.*/
 		s := ""
 		if sys.keyInput != KeyUnknown {
 			s = sys.keyString
@@ -3973,8 +3798,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getLastInputController", func(l *lua.LState) int {
 		/*Get the last controller that produced UI input.
 		@function getLastInputController
-		@treturn int playerNo 1-based player/controller index, or `-1` if unavailable.
-		function getLastInputController() end*/
+		@treturn int playerNo 1-based player/controller index, or `-1` if unavailable.*/
 		if sys.lastInputController >= 0 {
 			l.Push(lua.LNumber(sys.lastInputController + 1))
 		} else {
@@ -3985,8 +3809,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getMatchTime", func(*lua.LState) int {
 		/*Get the accumulated match time from completed rounds.
 		@function getMatchTime
-		@treturn int32 time Total round time accumulated in ticks.
-		function getMatchTime() end*/
+		@treturn int32 time Total round time accumulated in ticks.*/
 		var ti int32
 		for _, v := range sys.timerRounds {
 			ti += v
@@ -3997,8 +3820,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getMovelist", func(*lua.LState) int {
 		/*[redirectable] Get the character's movelist text.
 		@function getMovelist
-		@treturn string movelist Movelist text.
-		function getMovelist() end*/
+		@treturn string movelist Movelist text.*/
 		idx := int(sys.debugWC.movelist)
 		if idx < 0 {
 			idx = 0
@@ -4017,8 +3839,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getRandom", func(l *lua.LState) int {
 		/*Return a 32-bit random number, updating the global seed.
 		@function getRandom
-		@treturn int32 value Random value (1 to 2147483646 inclusive).
-		function getRandom() end*/
+		@treturn int32 value Random value (1 to 2147483646 inclusive).*/
 		l.Push(lua.LNumber(Random()))
 		return 1
 	})
@@ -4026,8 +3847,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get the input remap target for a player.
 		@function getRemapInput
 		@tparam int playerNo 1-based player/controller index.
-		@treturn int mappedPlayerNo 1-based remapped player/controller index.
-		function getRemapInput(playerNo) end*/
+		@treturn int mappedPlayerNo 1-based remapped player/controller index.*/
 		pn := int(numArg(l, 1))
 		if pn < 1 || pn > len(sys.inputRemap) {
 			l.RaiseError("\nInvalid player number: %v\n", pn)
@@ -4038,32 +3858,28 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getRoundTime", func(l *lua.LState) int {
 		/*Get the configured round time limit.
 		@function getRoundTime
-		@treturn int32 time Round time limit in ticks (or special values as configured).
-		function getRoundTime() end*/
+		@treturn int32 time Round time limit in ticks (or special values as configured).*/
 		l.Push(lua.LNumber(sys.maxRoundTime))
 		return 1
 	})
 	luaRegister(l, "getRuntimeOS", func(l *lua.LState) int {
 		/*Get the current runtime operating system identifier.
 		@function getRuntimeOS
-		@treturn string os Runtime OS name as reported by Go (for example `"windows"`, `"linux"`).
-		function getRuntimeOS() end*/
+		@treturn string os Runtime OS name as reported by Go (for example `"windows"`, `"linux"`).*/
 		l.Push(lua.LString(runtime.GOOS))
 		return 1
 	})
 	luaRegister(l, "getSelectNo", func(*lua.LState) int {
 		/*[redirectable] Get the character's select slot index.
 		@function getSelectNo
-		@treturn int selectNo Current select slot index.
-		function getSelectNo() end*/
+		@treturn int selectNo Current select slot index.*/
 		l.Push(lua.LNumber(sys.debugWC.selectNo))
 		return 1
 	})
 	luaRegister(l, "getSessionWarning", func(*lua.LState) int {
 		/*Pop the current session warning message.
 		@function getSessionWarning
-		@treturn string warning Current session warning message, or an empty string if none.
-		function getSessionWarning() end*/
+		@treturn string warning Current session warning message, or an empty string if none.*/
 		l.Push(lua.LString(sys.popSessionWarning()))
 		return 1
 	})
@@ -4077,8 +3893,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `def` (string) definition file path
 		  - `localcoord` (float32) base localcoord width
 		  - `portraitscale` (float32) scale applied to stage portraits
-		  - `attachedchardef` (string[]) list of attached character `.def` paths
-		function getStageInfo(stageRef) end*/
+		  - `attachedchardef` (string[]) list of attached character `.def` paths*/
 		c := sys.sel.GetStage(int(numArg(l, 1)))
 		tbl := l.NewTable()
 		tbl.RawSetString("name", lua.LString(c.name))
@@ -4097,8 +3912,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get the currently selected stage slot index.
 		@function getStageNo
 		@treturn int stageRef Currently selected stage reference as stored by the select system:
-		  `0` means random stage, `-1` means no stage selected, positive values are 1-based stage slots.
-		function getStageNo() end*/
+		  `0` means random stage, `-1` means no stage selected, positive values are 1-based stage slots.*/
 		l.Push(lua.LNumber(sys.sel.selectedStageNo))
 		return 1
 	})
@@ -4106,8 +3920,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Query the background preload state of a stage slot.
 		@function getStagePreloadStatus
 		@tparam int stageRef Stage index as used by the select system.
-		@treturn string state Preload state: `"idle"`, `"queued"`, `"loading"`, or `"ready"`.
-		function getStagePreloadStatus(stageRef) end*/
+		@treturn string state Preload state: `"idle"`, `"queued"`, `"loading"`, or `"ready"`.*/
 		state := sys.sel.StagePreloadStatus(int(numArg(l, 1)))
 		l.Push(lua.LString(state.String()))
 		return 1
@@ -4116,8 +3929,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get parsed select parameters for a stage entry.
 		@function getStageSelectParams
 		@tparam int stageRef Stage index as used by the select system.
-		@treturn table params Lua table created from the comma-separated `params` string passed to `addStage()`.
-		function getStageSelectParams(stageRef) end*/
+		@treturn table params Lua table created from the comma-separated `params` string passed to `addStage()`.*/
 		c := sys.sel.GetStage(int(numArg(l, 1)))
 		lv := toLValue(l, c.ssp)
 		lTable, ok := lv.(*lua.LTable)
@@ -4131,32 +3943,28 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getStateOwnerId", func(*lua.LState) int {
 		/*[redirectable] Get the character's player ID.
 		@function getStateOwnerId
-		@treturn int32 playerId Player ID of the current state owner.
-		function getStateOwnerId() end*/
+		@treturn int32 playerId Player ID of the current state owner.*/
 		l.Push(lua.LNumber(sys.debugWC.stateOwner().id))
 		return 1
 	})
 	luaRegister(l, "getStateOwnerName", func(*lua.LState) int {
 		/*[redirectable] Get the character's name of the current state owner.
 		@function getStateOwnerName
-		@treturn string name Name of the current state owner.
-		function getStateOwnerName() end*/
+		@treturn string name Name of the current state owner.*/
 		l.Push(lua.LString(sys.debugWC.stateOwner().name))
 		return 1
 	})
 	luaRegister(l, "getStateOwnerPlayerNo", func(*lua.LState) int {
 		/*[redirectable] Get the character's player number of the current state owner.
 		@function getStateOwnerPlayerNo
-		@treturn int playerNo 1-based player number of the current state owner.
-		function getStateOwnerPlayerNo() end*/
+		@treturn int playerNo 1-based player number of the current state owner.*/
 		l.Push(lua.LNumber(sys.debugWC.stateOwner().playerNo + 1))
 		return 1
 	})
 	luaRegister(l, "getStoryboardScene", func(l *lua.LState) int {
 		/*Get the current storyboard scene index.
 		@function getStoryboardScene
-		@treturn int|nil sceneIndex Current storyboard scene index, or `nil` if no storyboard is active.
-		function getStoryboardScene() end*/
+		@treturn int|nil sceneIndex Current storyboard scene index, or `nil` if no storyboard is active.*/
 		if sys.storyboard.active {
 			l.Push(lua.LNumber(sys.storyboard.currentSceneIndex))
 		} else {
@@ -4168,8 +3976,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Get a formatted timestamp string.
 		@function getTimestamp
 		@tparam[opt="2006-01-02 15:04:05.000"] string format Go-style time format layout.
-		@treturn string timestamp Current time formatted according to `format`.
-		function getTimestamp(format) end*/
+		@treturn string timestamp Current time formatted according to `format`.*/
 		format := "2006-01-02 15:04:05.000"
 		if !nilArg(l, 1) {
 			format = strArg(l, 1)
@@ -4180,8 +3987,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "getWinnerTeam", func(*lua.LState) int {
 		/*Get the winning team side of the current or last match.
 		@function getWinnerTeam
-		@treturn int32 teamSide Winning team side (`1` or `2`), `0` for draw/undecided, or `-1` when unavailable.
-		function getWinnerTeam() end*/
+		@treturn int32 teamSide Winning team side (`1` or `2`), `0` for draw/undecided, or `-1` when unavailable.*/
 		l.Push(lua.LNumber(sys.winnerTeam()))
 		return 1
 	})
@@ -4189,8 +3995,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Check whether a UI action name is currently active.
 		@function isUIKeyAction
 		@tparam string action UI action name.
-		@treturn boolean active `true` if the action is currently active.
-		function isUIKeyAction(action) end*/
+		@treturn boolean active `true` if the action is currently active.*/
 		l.Push(lua.LBool(sys.uiIsKeyAction(strArg(l, 1))))
 		return 1
 	})
@@ -4198,8 +4003,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Decode a JSON file into Lua values.
 		@function jsonDecode
 		@tparam string path Path to the JSON file.
-		@treturn any value Decoded JSON root value (Lua `string`, `number`, `boolean`, `table` or `nil`).
-		function jsonDecode(path) end*/
+		@treturn any value Decoded JSON root value (Lua `string`, `number`, `boolean`, `table` or `nil`).*/
 		path := strArg(l, 1)
 
 		f, err := os.Open(path)
@@ -4222,8 +4026,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Encode a Lua value to JSON and save it to a file.
 		@function jsonEncode
 		@tparam any value Lua value to encode (tables, numbers, strings, booleans, or `nil`).
-		@tparam string path Output JSON file path (parent directories are created as needed).
-		function jsonEncode(value, path) end*/
+		@tparam string path Output JSON file path (parent directories are created as needed).*/
 		lv := l.Get(1)
 		path := strArg(l, 2)
 		goVal, err := luaToJsonValue(lv, nil)
@@ -4262,8 +4065,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt] Sff sff Sprite file userdata used to resolve sprites while parsing.
 		  If omitted, an empty SFF is created internally.
 		@treturn table animTable Table mapping action numbers (int32) to `Animation` userdata.
-		  Each value is a parsed `*Animation` (usable with `animNew` and `animSetAnimation`).
-		function loadAnimTable(path, sff) end*/
+		  Each value is a parsed `*Animation` (usable with `animNew` and `animSetAnimation`).*/
 		def := ""
 		if !nilArg(l, 1) {
 			def = strArg(l, 1)
@@ -4290,8 +4092,7 @@ func systemScriptInit(l *lua.LState) {
 			l.RaiseError("\nCan't load anim table %v: %v\n", def, err.Error())
 			return 0
 		}
-		lines, i := SplitAndTrim(NormalizeNewlines(raw), "\n"), 0
-		at := ReadAnimationTable(def, sff, &sff.palList, lines, &i, true)
+		at := ReadAnimationTable(def, sff, &sff.palList, NormalizeNewlines(raw), true)
 		// Build Lua table with NUMERIC keys (so it prints like [110] => userdata ...)
 		tbl := l.NewTable()
 		// Deterministic iteration order
@@ -4315,8 +4116,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Load and set the font used by the debug overlay.
 		@function loadDebugFont
 		@tparam string filename Font filename.
-		@tparam[opt=1.0] float32 scale Uniform scale applied to debug text (both X and Y).
-		function loadDebugFont(filename, scale) end*/
+		@tparam[opt=1.0] float32 scale Uniform scale applied to debug text (both X and Y).*/
 		ts := NewTextSprite()
 		ts.palfx.ignoreAllPalFX = true
 		f, err := loadFnt(strArg(l, 1), -1)
@@ -4333,8 +4133,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "loadDebugInfo", func(l *lua.LState) int {
 		/*Register Lua functions to be called for debug info display.
 		@function loadDebugInfo
-		@tparam table funcs Array-like table of global function names (string).
-		function loadDebugInfo(funcs) end*/
+		@tparam table funcs Array-like table of global function names (string).*/
 		tableArg(l, 1).ForEach(func(_, value lua.LValue) {
 			sys.listLFunc = append(sys.listLFunc, sys.luaLState.GetGlobal(lua.LVAsString(value)).(*lua.LFunction))
 		})
@@ -4343,8 +4142,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "loadDebugStatus", func(l *lua.LState) int {
 		/*Register the Lua function used to draw debug status.
 		@function loadDebugStatus
-		@tparam string funcName Global Lua function name used for debug status.
-		function loadDebugStatus(funcName) end*/
+		@tparam string funcName Global Lua function name used for debug status.*/
 		sys.statusLFunc, _ = sys.luaLState.GetGlobal(strArg(l, 1)).(*lua.LFunction)
 		return 0
 	})
@@ -4353,8 +4151,7 @@ func systemScriptInit(l *lua.LState) {
 		@function loadFile
 		@tparam string filename Lua file path. Supports regular files and files inside `.zip` archives.
 		@treturn function|nil chunk Compiled Lua chunk on success, or `nil` if loading failed.
-		@treturn[opt] string error Error message when loading failed.
-		function loadFile(filename) end*/
+		@treturn[opt] string error Error message when loading failed.*/
 		filename := strArg(l, 1)
 		text, err := LoadText(filename)
 		if err != nil {
@@ -4379,8 +4176,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Load game options from a config file and return the current config as a table.
 		@function loadGameOption
 		@tparam[opt] string filename Config file path. If omitted, current config is kept.
-		@treturn table cfg Table representation of the current game configuration.
-		function loadGameOption(filename) end*/
+		@treturn table cfg Table representation of the current game configuration.*/
 		if !nilArg(l, 1) {
 			cfg, err := loadConfig(strArg(l, 1))
 			if err != nil {
@@ -4395,8 +4191,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "loading", func(l *lua.LState) int {
 		/*Check whether resources are currently being loaded.
 		@function loading
-		@treturn boolean loading `true` if the loader is in `LS_Loading` state.
-		function loading() end*/
+		@treturn boolean loading `true` if the loader is in `LS_Loading` state.*/
 		l.Push(lua.LBool(sys.loader.state == LS_Loading))
 		return 1
 	})
@@ -4409,8 +4204,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt=false] boolean keepMeta If `true`, each nested table receives an `__order` array
 		  preserving INI key order, and scalar values promoted to parent tables are preserved as `__value`.
 		@treturn table ini Table of sections; each section is a table of keys to strings.
-		  Dotted keys are converted to nested subtables.
-		function loadIni(filename, normalizeSections, keepMeta) end*/
+		  Dotted keys are converted to nested subtables.*/
 		def := ""
 		if !nilArg(l, 1) {
 			def = strArg(l, 1)
@@ -4445,8 +4239,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "loadFightScreen", func(l *lua.LState) int {
 		/*Load the fight screen definition.
 		@function loadFightScreen
-		@tparam[opt] string defPath FightScreen def file path. If empty or omitted, uses default.
-		function loadFightScreen(defPath) end*/
+		@tparam[opt] string defPath FightScreen def file path. If empty or omitted, uses default.*/
 		def := ""
 		if !nilArg(l, 1) {
 			def = strArg(l, 1)
@@ -4462,8 +4255,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Load a motif and return its configuration as a table.
 		@function loadMotif
 		@tparam[opt] string defPath Motif def file path. If empty or omitted, uses default.
-		@treturn table motif Motif configuration table (includes menus, fonts, sounds, etc.).
-		function loadMotif(defPath) end*/
+		@treturn table motif Motif configuration table (includes menus, fonts, sounds, etc.).*/
 		def := ""
 		if !nilArg(l, 1) {
 			def = strArg(l, 1)
@@ -4965,8 +4757,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "loadStart", func(l *lua.LState) int {
 		/*Validate selection and start asynchronous loading of characters and stage.
 		@function loadStart
-		@tparam[opt] string params Optional comma-separated parameter string (from launchFight and quickvs options)
-		function loadStart(params) end*/
+		@tparam[opt] string params Optional comma-separated parameter string (from launchFight and quickvs options)*/
 		if !sys.cfg.Config.VsScreenLoading {
 			sys.selMutex.RLock()
 			for k, v := range sys.sel.selected {
@@ -5010,15 +4801,13 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "loadCancel", func(*lua.LState) int {
 		/*Cancel an in-progress background load, clean up partially loaded assets, and reset the netplay loading handshake.
-		@function loadCancel
-		function loadCancel() end*/
+		@function loadCancel*/
 		sys.loadCancel()
 		return 0
 	})
 	luaRegister(l, "loadState", func(*lua.LState) int {
 		/*Request loading of a previously saved state on the next frame.
-		@function loadState
-		function loadState() end*/
+		@function loadState*/
 		sys.loadStateFlag = true
 		return 0
 	})
@@ -5027,8 +4816,7 @@ func systemScriptInit(l *lua.LState) {
 		@function loadStoryboard
 		@tparam string defPath Storyboard def file path.
 		@treturn table|nil storyboard Storyboard configuration table on success,
-		  or `nil` if no path is given or loading fails (a warning is printed).
-		function loadStoryboard(defPath) end*/
+		  or `nil` if no path is given or loading fails (a warning is printed).*/
 		if strArg(l, 1) == "" {
 			return 0
 		}
@@ -5047,8 +4835,7 @@ func systemScriptInit(l *lua.LState) {
 		@function loadText
 		@tparam string path Text file path.
 		@treturn string|nil content File contents on success, or `nil` if the file
-		  cannot be read.
-		function loadText(path) end*/
+		  cannot be read.*/
 		path := strArg(l, 1)
 		content, err := LoadText(path)
 		if err != nil {
@@ -5062,23 +4849,28 @@ func systemScriptInit(l *lua.LState) {
 		/*[redirectable] Set the character's map value.
 		@function mapSet
 		@tparam string name Map name to modify.
-		@tparam float32 value Map value to set.
+		@tparam number|string value Map value to set.
 		@tparam[opt] string mapType Map operation type. `"add"` adds to the existing value,
-		  anything else replaces it.
-		function mapSet(name, value, mapType) end*/
+		  anything else replaces it.*/
 		var scType int32
 		if !nilArg(l, 3) && strArg(l, 3) == "add" {
 			scType = 1
 		}
-		sys.debugWC.mapSet(strArg(l, 1), float32(numArg(l, 2)), scType)
+		// Typed from the Lua value: numbers stay numeric, anything else is text
+		var mv TypedValue
+		if num, ok := l.Get(2).(lua.LNumber); ok {
+			mv = TypedValue{Type: VT_Float, Num: float64(num)}
+		} else {
+			mv = TypedValue{Type: VT_String, Str: strArg(l, 2)}
+		}
+		sys.debugWC.mapSetValue(strArg(l, 1), mv, scType)
 		return 0
 	})
 	luaRegister(l, "motifIsInherited", func(l *lua.LState) int {
 		/*Returns whether a motif value was inherited from another motif parameter.
 		@function motifIsInherited
 		@tparam string key Motif key path.
-		@treturn boolean
-		function motifIsInherited(key) end*/
+		@treturn boolean*/
 		key := strings.ToLower(l.CheckString(1))
 		l.Push(lua.LBool(sys.motif.inheritedKeys[key]))
 		return 1
@@ -5086,8 +4878,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "storyboardCanceled", func(l *lua.LState) int {
 		/*Check whether the most recent storyboard was canceled by the player.
 		@function storyboardCanceled
-		@treturn boolean canceled `true` if the storyboard was canceled via Esc or cancel key.
-		function storyboardCanceled() end*/
+		@treturn boolean canceled `true` if the storyboard was canceled via Esc or cancel key.*/
 		l.Push(lua.LBool(sys.storyboard.canceled))
 		return 1
 	})
@@ -5095,8 +4886,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Load a 3D model (glTF) as a Model object.
 		@function modelNew
 		@tparam string filename glTF model file path.
-		@treturn Model model Model userdata.
-		function modelNew(filename) end*/
+		@treturn Model model Model userdata.*/
 		if nilArg(l, 1) {
 			l.Push(lua.LNil)
 			return 1
@@ -5121,8 +4911,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `boolean`: stored as boolean
 		  - `nil`: remove/clear value depending on context
 		  - `table`: treated as array of strings
-		  - other: converted to string
-		function modifyGameOption(query, value) end*/
+		  - other: converted to string*/
 		query := strArg(l, 1)
 		// Handle the second argument which can be nil, string, or a table
 		val := l.Get(2)
@@ -5161,8 +4950,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `boolean`: stored as boolean
 		  - `nil`: remove/clear value depending on context
 		  - `table`: treated as array of strings
-		  - other: converted to string
-		function modifyMotif(query, value) end*/
+		  - other: converted to string*/
 		query := strArg(l, 1)
 		// Handle the second argument which can be nil, string, or a table
 		val := l.Get(2)
@@ -5201,8 +4989,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `boolean`: stored as boolean
 		  - `nil`: remove/clear value depending on context
 		  - `table`: treated as array of strings
-		  - other: converted to string
-		function modifyStoryboard(query, value) end*/
+		  - other: converted to string*/
 		query := strArg(l, 1)
 		// Handle the second argument which can be nil, string, or a table
 		val := l.Get(2)
@@ -5236,23 +5023,22 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "netPlay", func(*lua.LState) int {
 		/*Check whether the current session is running in netplay mode.
 		@function netPlay
-		@treturn boolean active `true` if netplay is currently active.
-		function netPlay() end*/
+		@treturn boolean active `true` if netplay is currently active.*/
 		l.Push(lua.LBool(sys.netplay()))
 		return 1
 	})
 	luaRegister(l, "netLoadingReady", func(l *lua.LState) int {
 		/*Poll the non-blocking netplay loading handshake. Returns `true` when both peers have finished loading, or immediately if not in netplay.
 		@function netLoadingReady
-		@treturn boolean ready `true` if both sides are ready (or no net connection exists).
-		function netLoadingReady() end*/
+		@treturn boolean ready `true` if both sides are ready (or no net connection exists).*/
 		if sys.netConnection == nil {
 			l.Push(lua.LBool(true))
 			return 1
 		}
 		ready, err := sys.netConnection.LoadingReady()
 		if err != nil {
-			l.RaiseError(err.Error())
+			l.Push(lua.LBool(false))
+			return 1
 		}
 		l.Push(lua.LBool(ready))
 		return 1
@@ -5260,16 +5046,14 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "panicError", func(*lua.LState) int {
 		/*Raise an immediate Lua error with a custom message.
 		@function panicError
-		@tparam string message Error message.
-		function panicError(message) end*/
+		@tparam string message Error message.*/
 		l.RaiseError(strArg(l, 1))
 		return 0
 	})
 	luaRegister(l, "paused", func(*lua.LState) int {
 		/*Check whether gameplay is currently paused.
 		@function paused
-		@treturn boolean paused `true` if the game is paused and not currently frame-stepping.
-		function paused() end*/
+		@treturn boolean paused `true` if the game is paused and not currently frame-stepping.*/
 		l.Push(lua.LBool(sys.paused && !sys.frameStepFlag))
 		return 1
 	})
@@ -5289,8 +5073,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `freqmul` (float32, opt) Frequency multiplier (pitch)
 		  - `loopcount` (int, opt) Loop count (`-1` for infinite)
 		  - `interrupt` (boolean, opt) If `true`, always restart playback; if `false`, only update volume;
-		    if omitted, interruption is decided automatically based on whether the file changed.
-		function playBgm(params) end*/
+		    if omitted, interruption is decided automatically based on whether the file changed.*/
 		t := tableArg(l, 1)
 		// Defaults
 		var (
@@ -5466,8 +5249,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "playerBufReset", func(*lua.LState) int {
 		/*Reset player input buffers and disable hardcoded keys.
 		@function playerBufReset
-		@tparam[opt] int playerNo Player index (1-based). If omitted, resets all players.
-		function playerBufReset(playerNo) end*/
+		@tparam[opt] int playerNo Player index (1-based). If omitted, resets all players.*/
 		if !nilArg(l, 1) {
 			pn := int(numArg(l, 1))
 			if pn < 1 || pn > len(sys.chars) || len(sys.chars[pn-1]) == 0 {
@@ -5500,20 +5282,17 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt=false] boolean lowpriority If `true`, sound can be overridden by higher-priority sounds.
 		@tparam[opt=1.0] float32 freqmul Frequency multiplier (pitch).
 		@tparam[opt=false] boolean loop If `true`, sound loops (ignored if `loopcount` is non-zero).
-		@tparam[opt=0.0] float32 pan Stereo panning (engine-specific range, usually -1.0 to 1.0).
+		@tparam[opt=0.0] float32 pan Offset from the character; negative is backward, positive is forward.
 		@tparam[opt=0] int32 priority Priority level (higher plays over lower).
 		@tparam[opt=0] int loopstart Loop start position.
 		@tparam[opt=0] int loopend Loop end position.
 		@tparam[opt=0] int startposition Initial playback position.
 		@tparam[opt=0] int32 loopcount Loop count: `0` uses `loop` flag, positive = exact loops, negative = infinite.
 		@tparam[opt=false] boolean stopOnGetHit If `true`, stop this sound when the character is hit.
-		@tparam[opt=false] boolean stopOnChangeState If `true`, stop this sound when the character changes state.
-		function playSnd(group, sound, volumescale, commonSnd, channel, lowpriority, freqmul,
-		  loop, pan, priority, loopstart, loopend, startposition, loopcount,
-		  stopOnGetHit, stopOnChangeState) end*/
+		@tparam[opt=false] boolean stopOnChangeState If `true`, stop this sound when the character changes state.*/
 
 		params := newPlaySndParams()
-		params.xPos = &sys.debugWC.pos[0]
+		params.sourceID = sys.debugWC.id
 		params.localScale = sys.debugWC.localscl
 
 		var lp bool
@@ -5582,16 +5361,14 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "postMatch", func(*lua.LState) int {
 		/*Check whether post-match processing is active.
 		@function postMatch
-		@treturn boolean active `true` if the engine is in post-match state.
-		function postMatch() end*/
+		@treturn boolean active `true` if the engine is in post-match state.*/
 		l.Push(lua.LBool(sys.postMatchFlg))
 		return 1
 	})
 	luaRegister(l, "preloading", func(l *lua.LState) int {
 		/*Check whether resources are currently being preloaded.
 		@function preloading
-		@treturn boolean `true` if assets are still being preloaded.
-		function preloading() end*/
+		@treturn boolean `true` if assets are still being preloaded.*/
 		l.Push(lua.LBool(!sys.sel.AllPreloadsReady()))
 		return 1
 	})
@@ -5600,8 +5377,7 @@ func systemScriptInit(l *lua.LState) {
 		@function preloadListChar
 		@tparam int32|uint16 id Action number, or sprite group number when `number` is provided.
 		@tparam[opt] uint16 number If provided, `id` and `number` are used as sprite group/number keys;
-		  otherwise `id` is treated as an animation/action number (`int32`).
-		function preloadListChar(id, number) end*/
+		  otherwise `id` is treated as an animation/action number (`int32`).*/
 		if !nilArg(l, 2) {
 			sys.sel.charSpritePreload[[...]uint16{uint16(numArg(l, 1)), uint16(numArg(l, 2))}] = true
 		} else {
@@ -5614,8 +5390,7 @@ func systemScriptInit(l *lua.LState) {
 		@function preloadListStage
 		@tparam int32|uint16 id Action number, or sprite group number when `number` is provided.
 		@tparam[opt] uint16 number If provided, `id` and `number` are used as sprite group/number keys;
-		  otherwise `id` is treated as an animation/action number (`int32`).
-		function preloadListStage(id, number) end*/
+		  otherwise `id` is treated as an animation/action number (`int32`).*/
 		if !nilArg(l, 2) {
 			sys.sel.stageSpritePreload[[...]uint16{uint16(numArg(l, 1)), uint16(numArg(l, 2))}] = true
 		} else {
@@ -5627,8 +5402,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Print text to the in-game console and standard output.
 		@function printConsole
 		@tparam string text Text to print.
-		@tparam[opt=false] boolean appendLast If `true`, appends to the last console line; otherwise starts a new line.
-		function printConsole(text, appendLast) end*/
+		@tparam[opt=false] boolean appendLast If `true`, appends to the last console line; otherwise starts a new line.*/
 		if !nilArg(l, 2) && boolArg(l, 2) && len(sys.consoleText) > 0 {
 			sys.consoleText[len(sys.consoleText)-1] += strArg(l, 1)
 		} else {
@@ -5640,8 +5414,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "puts", func(*lua.LState) int {
 		/*Print text to standard output (stdout) only.
 		@function puts
-		@tparam string text Text to print.
-		function puts(text) end*/
+		@tparam string text Text to print.*/
 		fmt.Println(strArg(l, 1))
 		return 0
 	})
@@ -5649,8 +5422,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Queue a character for background preloading of portraits and palettes.
 		@function queueCharPreload
 		@tparam int charRef 0-based character index in the select list.
-		@tparam[opt=1] int priority Priority level (`1` = low, `2` = high).
-		function queueCharPreload(charRef, priority) end*/
+		@tparam[opt=1] int priority Priority level (`1` = low, `2` = high).*/
 		ref := int(numArg(l, 1))
 		priority := PreloadPriorityLow
 		if !nilArg(l, 2) {
@@ -5663,8 +5435,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Queue a stage for background preloading of portraits.
 		@function queueStagePreload
 		@tparam int stageRef Stage index as used by the select system.
-		@tparam[opt=1] int priority Priority level (`1` = low, `2` = high).
-		function queueStagePreload(stageRef, priority) end*/
+		@tparam[opt=1] int priority Priority level (`1` = low, `2` = high).*/
 		ref := int(numArg(l, 1))
 		priority := PreloadPriorityLow
 		if !nilArg(l, 2) {
@@ -5677,8 +5448,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Print a rectangle's debug information.
 		@function rectDebug
 		@tparam Rect rect Rectangle userdata.
-		@tparam[opt] string prefix Optional text printed before the rectangle.
-		function rectDebug(rect, prefix) end*/
+		@tparam[opt] string prefix Optional text printed before the rectangle.*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5694,8 +5464,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Queue drawing of a rectangle.
 		@function rectDraw
 		@tparam Rect rect Rectangle userdata.
-		@tparam[opt] int16 layer Layer number to draw on (defaults to `rect.layerno`).
-		function rectDraw(rect, layer) end*/
+		@tparam[opt] int16 layer Layer number to draw on (defaults to `rect.layerno`).*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5715,8 +5484,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "rectNew", func(*lua.LState) int {
 		/*Create a new rectangle object.
 		@function rectNew
-		@treturn Rect rect Newly created rectangle userdata.
-		function rectNew() end*/
+		@treturn Rect rect Newly created rectangle userdata.*/
 		rect := NewRect()
 		l.Push(newUserData(l, rect))
 		return 1
@@ -5724,8 +5492,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "rectReset", func(*lua.LState) int {
 		/*Reset rectangle parameters to defaults.
 		@function rectReset
-		@tparam Rect rect Rectangle userdata.
-		function rectReset(rect) end*/
+		@tparam Rect rect Rectangle userdata.*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5738,8 +5505,7 @@ func systemScriptInit(l *lua.LState) {
 		@function rectSetAlpha
 		@tparam Rect rect Rectangle userdata.
 		@tparam int32 src Source alpha.
-		@tparam int32 dst Destination alpha.
-		function rectSetAlpha(rect, src, dst) end*/
+		@tparam int32 dst Destination alpha.*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5753,8 +5519,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam Rect rect Rectangle userdata.
 		@tparam int32 min Minimum alpha.
 		@tparam int32 max Maximum alpha.
-		@tparam int32 time Pulse period (frames).
-		function rectSetAlphaPulse(rect, min, max, time) end*/
+		@tparam int32 time Pulse period (frames).*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5768,8 +5533,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam Rect rect Rectangle userdata.
 		@tparam int32 r Red component (0–255).
 		@tparam int32 g Green component (0–255).
-		@tparam int32 b Blue component (0–255).
-		function rectSetColor(rect, r, g, b) end*/
+		@tparam int32 b Blue component (0–255).*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5781,8 +5545,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the rectangle's drawing layer.
 		@function rectSetLayerno
 		@tparam Rect rect Rectangle userdata.
-		@tparam int16 layer Layer number.
-		function rectSetLayerno(rect, layer) end*/
+		@tparam int16 layer Layer number.*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5795,8 +5558,7 @@ func systemScriptInit(l *lua.LState) {
 		@function rectSetLocalcoord
 		@tparam Rect rect Rectangle userdata.
 		@tparam float32 x Local coordinate width.
-		@tparam float32 y Local coordinate height.
-		function rectSetLocalcoord(rect, x, y) end*/
+		@tparam float32 y Local coordinate height.*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5811,8 +5573,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam float32 x1 Left coordinate.
 		@tparam float32 y1 Top coordinate.
 		@tparam float32 x2 Right coordinate.
-		@tparam float32 y2 Bottom coordinate.
-		function rectSetWindow(rect, x1, y1, x2, y2) end*/
+		@tparam float32 y2 Bottom coordinate.*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5823,8 +5584,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "rectUpdate", func(*lua.LState) int {
 		/*Update rectangle animation (alpha pulse, etc.).
 		@function rectUpdate
-		@tparam Rect rect Rectangle userdata.
-		function rectUpdate(rect) end*/
+		@tparam Rect rect Rectangle userdata.*/
 		r, ok := toUserData(l, 1).(*Rect)
 		if !ok {
 			userDataError(l, 1, r)
@@ -5834,8 +5594,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "refresh", func(*lua.LState) int {
 		/*Advance one frame: process logic, drawing and fades.
-		@function refresh
-		function refresh() end*/
+		@function refresh*/
 		sys.tickSound()
 		if !sys.frameSkip {
 			sys.luaFlushDrawQueue()
@@ -5863,8 +5622,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "reload", func(*lua.LState) int {
 		/*Schedule reloading of characters, stage and fight screen.
-		@function reload
-		function reload() end*/
+		@function reload*/
 		sys.reloadFlg = true
 		for i := range sys.reloadCharSlot {
 			sys.reloadCharSlot[i] = true
@@ -5877,8 +5635,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Remap logical player input to another player slot.
 		@function remapInput
 		@tparam int32 srcPlayer Source player number (1-based).
-		@tparam int32 dstPlayer Destination player number (1-based).
-		function remapInput(srcPlayer, dstPlayer) end*/
+		@tparam int32 dstPlayer Destination player number (1-based).*/
 		src, dst := int(numArg(l, 1)), int(numArg(l, 2))
 		if src < 1 || src > len(sys.inputRemap) ||
 			dst < 1 || dst > len(sys.inputRemap) {
@@ -5889,16 +5646,14 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "removeDizzy", func(*lua.LState) int {
 		/*[redirectable] Clear the character's dizzy state.
-		@function removeDizzy
-		function removeDizzy() end*/
+		@function removeDizzy*/
 		sys.debugWC.unsetSCF(SCF_dizzy)
 		return 0
 	})
 	luaRegister(l, "replayRecord", func(*lua.LState) int {
 		/*Start recording rollback/netplay input to a file.
 		@function replayRecord
-		@tparam string path Output file path.
-		function replayRecord(path) end*/
+		@tparam string path Output file path.*/
 		if sys.netConnection != nil {
 			sys.netConnection.recording, _ = os.Create(strArg(l, 1))
 			sys.netConnection.headerWritten = false
@@ -5907,26 +5662,23 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "replayStop", func(*lua.LState) int {
 		/*Stop input replay recording.
-		@function replayStop
-		function replayStop() end*/
+		@function replayStop*/
 		if sys.cfg.Netplay.RollbackNetcode {
 			if sys.rollback.session != nil && sys.rollback.session.recording != nil {
 				sys.rollback.session.recording.Close()
 				sys.rollback.session.recording = nil
 			}
-		} else {
-			if sys.netConnection != nil && sys.netConnection.recording != nil {
-				sys.netConnection.recording.Close()
-				sys.netConnection.recording = nil
-				sys.netConnection.headerWritten = false
-			}
+		}
+		if sys.netConnection != nil && sys.netConnection.recording != nil {
+			sys.netConnection.recording.Close()
+			sys.netConnection.recording = nil
+			sys.netConnection.headerWritten = false
 		}
 		return 0
 	})
 	luaRegister(l, "resetAILevel", func(l *lua.LState) int {
 		/*Reset AI level for all players to 0 (human control).
-		@function resetAILevel
-		function resetAILevel() end*/
+		@function resetAILevel*/
 		for i := range sys.aiLevel {
 			sys.aiLevel[i] = 0
 		}
@@ -5934,8 +5686,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "resetGameStats", func(*lua.LState) int {
 		/*Clear all accumulated game statistics.
-		@function resetGameStats
-		function resetGameStats() end*/
+		@function resetGameStats*/
 		sys.statsLog.reset()
 		sys.continueFlg = false
 		sys.persistRoundCount = 0
@@ -5943,8 +5694,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "resetGameParams", func(*lua.LState) int {
 		/*Reset per-match game parameters to motif defaults. Called before `loadStart` when background loading feeds params incrementally via `selectChar`.
-		@function resetGameParams
-		function resetGameParams() end*/
+		@function resetGameParams*/
 		if sys.sel.gameParams == nil {
 			sys.sel.gameParams = newGameParamsFromMotif(&sys.motif)
 		} else {
@@ -5954,8 +5704,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "resetKey", func(*lua.LState) int {
 		/*Clear the last captured key and text input.
-		@function resetKey
-		function resetKey() end*/
+		@function resetKey*/
 		sys.keyInput = KeyUnknown
 		sys.keyString = ""
 		return 0
@@ -5963,22 +5712,19 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "resetMatchData", func(*lua.LState) int {
 		/*Reset match-related runtime data.
 		@function resetMatchData
-		@tparam boolean fullReset If `true`, perform a full match data reset.
-		function resetMatchData(fullReset) end*/
+		@tparam boolean fullReset If `true`, perform a full match data reset.*/
 		sys.resetMatchData(boolArg(l, 1))
 		return 0
 	})
 	luaRegister(l, "resetRemapInput", func(l *lua.LState) int {
 		/*Reset all input remapping to defaults.
-		@function resetRemapInput
-		function resetRemapInput() end*/
+		@function resetRemapInput*/
 		sys.resetRemapInput()
 		return 0
 	})
 	luaRegister(l, "resetRound", func(*lua.LState) int {
 		/*Request a round reset.
-		@function resetRound
-		function resetRound() end*/
+		@function resetRound*/
 		sys.roundResetFlg = true
 		sys.roundResetMatchStart = true
 		return 0
@@ -5986,8 +5732,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "resetScore", func(*lua.LState) int {
 		/*Reset a team's score to zero.
 		@function resetScore
-		@tparam int teamSide Team side (`1` or `2`).
-		function resetScore(teamSide) end*/
+		@tparam int teamSide Team side (`1` or `2`).*/
 		tn := int(numArg(l, 1))
 		if tn < 1 || tn > 2 {
 			l.RaiseError("\nInvalid team side: %v\n", tn)
@@ -5997,24 +5742,21 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "resetTokenGuard", func(*lua.LState) int {
 		/*Reset the UI input token guard.
-		@function resetTokenGuard
-		function resetTokenGuard() end*/
+		@function resetTokenGuard*/
 		sys.uiResetTokenGuard()
 		return 0
 	})
 	luaRegister(l, "roundOver", func(*lua.LState) int {
 		/*Check whether the current round is over.
 		@function roundOver
-		@treturn boolean over `true` if the current round is over.
-		function roundOver() end*/
+		@treturn boolean over `true` if the current round is over.*/
 		l.Push(lua.LBool(sys.roundOver()))
 		return 1
 	})
 	luaRegister(l, "roundStart", func(*lua.LState) int {
 		/*Check whether the current frame is the start of the round.
 		@function roundStart
-		@treturn boolean start `true` on the first tick of the round.
-		function roundStart() end*/
+		@treturn boolean start `true` on the first tick of the round.*/
 		l.Push(lua.LBool(sys.tickCount == 1))
 		return 1
 	})
@@ -6027,8 +5769,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt=false] boolean nofade If `true`, disable fade-in and fade-out effects.
 		@tparam[opt=false] boolean nobgs If `true`, disable background rendering.
 		@tparam[opt=false] boolean nooverlay If `true`, disable overlay rendering.
-		@treturn boolean active `true` while the hiscore screen is active.
-		function runHiscore(mode, place, endtime, nofade, nobgs, nooverlay) end*/
+		@treturn boolean active `true` while the hiscore screen is active.*/
 		if !sys.paused || sys.frameStepFlag {
 			if !sys.motif.hi.initialized {
 				var mode string
@@ -6069,8 +5810,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "runStoryboard", func(*lua.LState) int {
 		/*Run the currently loaded storyboard for one frame.
 		@function runStoryboard
-		@treturn boolean active `true` while the storyboard is active.
-		function runStoryboard() end*/
+		@treturn boolean active `true` while the storyboard is active.*/
 		if !sys.paused || sys.frameStepFlag {
 			if sys.storyboard.IniFile != nil && !sys.storyboard.initialized {
 				sys.storyboard.init()
@@ -6090,8 +5830,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "saveGameOption", func(l *lua.LState) int {
 		/*Save current game options to file.
 		@function saveGameOption
-		@tparam[opt] string path Config file path. Defaults to the current config's `Def` path.
-		function saveGameOption(path) end*/
+		@tparam[opt] string path Config file path. Defaults to the current config's `Def` path.*/
 		path := sys.cfg.Def
 		if !nilArg(l, 1) {
 			path = strArg(l, 1)
@@ -6108,8 +5847,7 @@ func systemScriptInit(l *lua.LState) {
 		  Each top-level key is the section name and each value must be a table.
 		  Nested tables inside a section are flattened using dotted keys.
 		  Array-like tables are saved as comma-separated lists.
-		@tparam string filename Output INI file path.
-		function saveIni(iniTable, filename) end*/
+		@tparam string filename Output INI file path.*/
 		tbl := tableArg(l, 1)
 		if tbl == nil {
 			l.RaiseError("saveIni: expected table as first argument")
@@ -6140,15 +5878,13 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "saveState", func(*lua.LState) int {
 		/*Request saving of the current state on the next frame.
-		@function saveState
-		function saveState() end*/
+		@function saveState*/
 		sys.saveStateFlag = true
 		return 0
 	})
 	luaRegister(l, "screenshot", func(*lua.LState) int {
 		/*Take a screenshot on the next frame.
-		@function screenshot
-		function screenshot() end*/
+		@function screenshot*/
 		if !sys.isTakingScreenshot {
 			sys.isTakingScreenshot = true
 		}
@@ -6159,8 +5895,7 @@ func systemScriptInit(l *lua.LState) {
 		@function searchFile
 		@tparam string filename Filename to search for.
 		@tparam table dirs Array-like table of directory paths (string).
-		@treturn string path Resolved file path, or empty string if not found.
-		function searchFile(filename, dirs) end*/
+		@treturn string path Resolved file path, or empty string if not found.*/
 		var dirs []string
 		tableArg(l, 2).ForEach(func(key, value lua.LValue) {
 			dirs = append(dirs, lua.LVAsString(value))
@@ -6178,8 +5913,7 @@ func systemScriptInit(l *lua.LState) {
 		@treturn int status Selection status:
 		  - `0` – character not added
 		  - `1` – added, team is not yet full
-		  - `2` – added, team is now full
-		function selectChar(teamSide, charRef, palette, overrideParams) end*/
+		  - `2` – added, team is now full*/
 		cn := int(numArg(l, 2))
 		if cn < 0 || cn >= len(sys.sel.charlist) {
 			l.RaiseError("\nInvalid char ref: %v\n", cn)
@@ -6245,8 +5979,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Select a stage by index.
 		@function selectStage
 		@tparam int stageRef Stage reference used by the select system.
-		  `0` selects the random stage sentinel; positive values are 1-based stage slots.
-		function selectStage(stageRef) end*/
+		  `0` selects the random stage sentinel; positive values are 1-based stage slots.*/
 		sn := int(numArg(l, 1))
 		if sn < 0 || sn > len(sys.sel.stagelist) {
 			l.RaiseError("\nInvalid stage ref: %v\n", sn)
@@ -6256,8 +5989,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "selectStart", func(l *lua.LState) int {
 		/*Clear current selection and start loading the match.
-		@function selectStart
-		function selectStart() end*/
+		@function selectStart*/
 		sys.sel.ClearSelected()
 		sys.loadStart()
 		return 0
@@ -6265,24 +5997,21 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "selfState", func(*lua.LState) int {
 		/*[redirectable] Force the character into a specified state.
 		@function selfState
-		@tparam int32 stateNo Target state number.
-		function selfState(stateNo) end*/
+		@tparam int32 stateNo Target state number.*/
 		sys.debugWC.selfState(int32(numArg(l, 1)), -1, -1, 1, "")
 		return 0
 	})
 	luaRegister(l, "setAccel", func(*lua.LState) int {
 		/*Set debug time acceleration.
 		@function setAccel
-		@tparam float32 accel Time acceleration multiplier.
-		function setAccel(accel) end*/
+		@tparam float32 accel Time acceleration multiplier.*/
 		sys.debugAccel = float32(numArg(l, 1))
 		return 0
 	})
 	luaRegister(l, "setAILevel", func(*lua.LState) int {
 		/*[redirectable] Set the character's AI level.
 		@function setAILevel
-		@tparam float32 level AI level (`0` = human control, >0 = AI).
-		function setAILevel(level) end*/
+		@tparam float32 level AI level (`0` = human control, >0 = AI).*/
 		sys.debugWC.setAILevel(Clamp(float32(numArg(l, 1)), 0, 8))
 		return 0
 	})
@@ -6290,8 +6019,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set AI level for a specific player.
 		@function setCom
 		@tparam int playerNo Player number (1-based).
-		@tparam float32 level AI level (`0` = off, >0 = AI).
-		function setCom(playerNo, level) end*/
+		@tparam float32 level AI level (`0` = off, >0 = AI).*/
 		pn := int(numArg(l, 1))
 		if pn < 1 || pn > MaxPlayerNo {
 			l.RaiseError("\nInvalid player number: %v\n", pn)
@@ -6303,8 +6031,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the number of consecutive wins for a team.
 		@function setConsecutiveWins
 		@tparam int teamSide Team side (`1` or `2`).
-		@tparam int32 wins Number of consecutive wins.
-		function setConsecutiveWins(teamSide, wins) end*/
+		@tparam int32 wins Number of consecutive wins.*/
 		tn := int(numArg(l, 1))
 		if tn < 1 || tn > 2 {
 			l.RaiseError("\nInvalid team side: %v\n", tn)
@@ -6315,8 +6042,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setCredits", func(*lua.LState) int {
 		/*Set the number of credits.
 		@function setCredits
-		@tparam int32 credits Credit count.
-		function setCredits(credits) end*/
+		@tparam int32 credits Credit count.*/
 		sys.credits = int32(numArg(l, 1))
 		return 0
 	})
@@ -6328,8 +6054,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam[opt] table enabled Optional table limiting which bindings are set.
 		  Can be either:
 		  - an array-like table of binding names, or
-		  - a map-like table `{bindingName = true, ...}`.
-		function setDefaultConfig(configType, playerNo, enabled) end*/
+		  - a map-like table `{bindingName = true, ...}`.*/
 		cfgType := strArg(l, 1)
 		pn := int(numArg(l, 2))
 		var enabled map[string]bool
@@ -6362,32 +6087,28 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setDizzyPoints", func(*lua.LState) int {
 		/*[redirectable] Set the character's dizzy points.
 		@function setDizzyPoints
-		@tparam int32 value Dizzy points value.
-		function setDizzyPoints(value) end*/
+		@tparam int32 value Dizzy points value.*/
 		sys.debugWC.dizzyPointsSet(int32(numArg(l, 1)))
 		return 0
 	})
 	luaRegister(l, "setGameMode", func(*lua.LState) int {
 		/*Set current game mode identifier.
 		@function setGameMode
-		@tparam string mode Game mode name (for example `"arcade"`, `"versus"`, `"training"`).
-		function setGameMode(mode) end*/
+		@tparam string mode Game mode name (for example `"arcade"`, `"versus"`, `"training"`).*/
 		sys.gameMode = strArg(l, 1)
 		return 0
 	})
 	luaRegister(l, "setGameSpeed", func(*lua.LState) int {
 		/*Set global game speed option.
 		@function setGameSpeed
-		@tparam int speed Game speed value (engine-specific range).
-		function setGameSpeed(speed) end*/
+		@tparam int speed Game speed value (engine-specific range).*/
 		sys.cfg.Options.GameSpeed = int(numArg(l, 1))
 		return 0
 	})
 	luaRegister(l, "setGameStatsJson", func(l *lua.LState) int {
 		/*Restore accumulated game statistics from a JSON snapshot.
 		@function setGameStatsJson
-		@tparam string json JSON string previously produced by `getGameStatsJson()`.
-		function setGameStatsJson(json) end*/
+		@tparam string json JSON string previously produced by `getGameStatsJson()`.*/
 		var s GameStatsSnapshot
 		if err := json.Unmarshal([]byte(strArg(l, 1)), &s); err != nil {
 			l.RaiseError("setGameStatsJson: %v", err)
@@ -6401,16 +6122,14 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setGuardPoints", func(*lua.LState) int {
 		/*[redirectable] Set the character's guard points.
 		@function setGuardPoints
-		@tparam int32 value Guard points value.
-		function setGuardPoints(value) end*/
+		@tparam int32 value Guard points value.*/
 		sys.debugWC.guardPointsSet(int32(numArg(l, 1)))
 		return 0
 	})
 	luaRegister(l, "setHomeTeam", func(l *lua.LState) int {
 		/*Set which team is the home team.
 		@function setHomeTeam
-		@tparam int teamSide Team side (`1` or `2`).
-		function setHomeTeam(teamSide) end*/
+		@tparam int teamSide Team side (`1` or `2`).*/
 		tn := int(numArg(l, 1))
 		if tn < 1 || tn > 2 {
 			l.RaiseError("\nInvalid team side: %v\n", tn)
@@ -6424,8 +6143,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int playerNo Player number (1-based).
 		@tparam int controllerId Input config target selector: `-1` updates keyboard bindings,
 		  any value `>= 0` updates joystick bindings.
-		@tparam table mapping Table mapping button indices (`1`–`14`) to key/button names (string).
-		function setKeyConfig(playerNo, controllerId, mapping) end*/
+		@tparam table mapping Table mapping button indices (`1`–`14`) to key/button names (string).*/
 		pn := int(numArg(l, 1))
 		joy := int(numArg(l, 2))
 		if pn < 1 || (joy == -1 && pn > len(sys.keyConfig)) || (joy >= 0 && pn > len(sys.joystickConfig)) {
@@ -6507,8 +6225,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setLastInputController", func(l *lua.LState) int {
 		/*Set the last UI input controller.
 		@function setLastInputController
-		@tparam int playerNo 1-based player/controller index. Values less than `1` clear it.
-		function setLastInputController(playerNo) end*/
+		@tparam int playerNo 1-based player/controller index. Values less than `1` clear it.*/
 		// Lua-facing controller indices are 1-based
 		n := int(numArg(l, 1))
 		if n >= 1 {
@@ -6521,8 +6238,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setLife", func(*lua.LState) int {
 		/*[redirectable] Set the character's life.
 		@function setLife
-		@tparam int32 life New life value (only applied if the character is alive).
-		function setLife(life) end*/
+		@tparam int32 life New life value (only applied if the character is alive).*/
 		if sys.debugWC.alive() {
 			sys.debugWC.lifeSet(int32(numArg(l, 1)))
 		}
@@ -6543,8 +6259,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `p1wincount`, `p2wincount` (boolean) win count displays
 		  - `redlifebar` (boolean) red life bar
 		  - `stunbar` (boolean) stun bar
-		  - `timer` (boolean) round timer
-		function setFightScreenElements(elements) end*/
+		  - `timer` (boolean) round timer*/
 		tableArg(l, 1).ForEach(func(key, value lua.LValue) {
 			switch k := key.(type) {
 			case lua.LString:
@@ -6614,8 +6329,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set initial fight screen scores for both teams.
 		@function setFightScreenScore
 		@tparam float32 p1Score Starting score for team 1.
-		@tparam[opt] float32 p2Score Starting score for team 2 (defaults to 0 if omitted).
-		function setFightScreenScore(p1Score, p2Score) end*/
+		@tparam[opt] float32 p2Score Starting score for team 2 (defaults to 0 if omitted).*/
 		sys.scoreStart[0] = float32(numArg(l, 1))
 		if !nilArg(l, 2) {
 			sys.scoreStart[1] = float32(numArg(l, 2))
@@ -6625,8 +6339,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setFightScreenTimer", func(*lua.LState) int {
 		/*Set initial round timer value displayed on the fight screen.
 		@function setFightScreenTimer
-		@tparam int32 time Initial timer value.
-		function setFightScreenTimer(time) end*/
+		@tparam int32 time Initial timer value.*/
 		sys.timerStart = int32(numArg(l, 1))
 		return 0
 	})
@@ -6634,8 +6347,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set maximum number of draw games allowed for a team.
 		@function setMatchMaxDrawGames
 		@tparam int teamSide Team side (`1` or `2`).
-		@tparam int32 count Maximum draw games.
-		function setMatchMaxDrawGames(teamSide, count) end*/
+		@tparam int32 count Maximum draw games.*/
 		tn := int(numArg(l, 1))
 		if tn < 1 || tn > 2 {
 			l.RaiseError("\nInvalid team side: %v\n", tn)
@@ -6646,8 +6358,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setMatchNo", func(l *lua.LState) int {
 		/*Set the current match number.
 		@function setMatchNo
-		@tparam int32 matchNo Match index/number.
-		function setMatchNo(matchNo) end*/
+		@tparam int32 matchNo Match index/number.*/
 		sys.matchNo = int32(numArg(l, 1))
 		return 0
 	})
@@ -6655,8 +6366,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set number of round wins required to win the match for a team.
 		@function setMatchWins
 		@tparam int teamSide Team side (`1` or `2`).
-		@tparam int32 wins Required wins.
-		function setMatchWins(teamSide, wins) end*/
+		@tparam int32 wins Required wins.*/
 		tn := int(numArg(l, 1))
 		if tn < 1 || tn > 2 {
 			l.RaiseError("\nInvalid team side: %v\n", tn)
@@ -6678,8 +6388,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `vsmatchno` (boolean) versus screen match number
 		  - `victoryscreen` (boolean) victory screen
 		  - `winscreen` (boolean) win screen
-		  - `menu` (boolean) main menu
-		function setMotifElements(elements) end*/
+		  - `menu` (boolean) main menu*/
 		tableArg(l, 1).ForEach(func(key, value lua.LValue) {
 			switch k := key.(type) {
 			case lua.LString:
@@ -6715,8 +6424,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "setPlayers", func(l *lua.LState) int {
 		/*Resize player input configuration data to match `config.Players`.
-		@function setPlayers
-		function setPlayers() end*/
+		@function setPlayers*/
 		total := sys.cfg.Config.Players
 		if err := sys.uiEnsureCommandLists(total); err != nil {
 			l.RaiseError("\nuiEnsureCommandLists: %v\n", err.Error())
@@ -6772,24 +6480,21 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setPower", func(*lua.LState) int {
 		/*[redirectable] Set the character's power.
 		@function setPower
-		@tparam int32 power Power value.
-		function setPower(power) end*/
+		@tparam int32 power Power value.*/
 		sys.debugWC.setPower(int32(numArg(l, 1)))
 		return 0
 	})
 	luaRegister(l, "setRedLife", func(*lua.LState) int {
 		/*[redirectable] Set the character's red life.
 		@function setRedLife
-		@tparam int32 value Red life value.
-		function setRedLife(value) end*/
+		@tparam int32 value Red life value.*/
 		sys.debugWC.redLifeSet(int32(numArg(l, 1)))
 		return 0
 	})
 	luaRegister(l, "setRoundTime", func(l *lua.LState) int {
 		/*Set maximum round time (in ticks/counts).
 		@function setRoundTime
-		@tparam int32 time Maximum round time.
-		function setRoundTime(time) end*/
+		@tparam int32 time Maximum round time.*/
 		t := int32(numArg(l, 1))
 		// Since legacy mode rounds down the timer, we must add an offset just under one count to compensate
 		// This is also how Mugen handles it
@@ -6804,8 +6509,7 @@ func systemScriptInit(l *lua.LState) {
 		@function setTeamMode
 		@tparam int teamSide Team side (`1` or `2`).
 		@tparam int32 mode Team mode (for example `TM_Single`, `TM_Simul`, `TM_Turns`, `TM_Tag`).
-		@tparam int32 teamSize Number of members (for non-turns: `1..MaxSimul`, for turns: `>=1`).
-		function setTeamMode(teamSide, mode, teamSize) end*/
+		@tparam int32 teamSize Number of members (for non-turns: `1..MaxSimul`, for turns: `>=1`).*/
 		tn := int(numArg(l, 1))
 		if tn < 1 || tn > 2 {
 			l.RaiseError("\nInvalid team side: %v\n", tn)
@@ -6837,16 +6541,14 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "setTime", func(*lua.LState) int {
 		/*Set the current round time value.
 		@function setTime
-		@tparam int32 time Current timer value.
-		function setTime(time) end*/
+		@tparam int32 time Current timer value.*/
 		sys.curRoundTime = int32(numArg(l, 1))
 		return 0
 	})
 	luaRegister(l, "setTimeFramesPerCount", func(l *lua.LState) int {
 		/*Set how many frames correspond to one timer count.
 		@function setTimeFramesPerCount
-		@tparam int32 frames Frames per timer count.
-		function setTimeFramesPerCount(frames) end*/
+		@tparam int32 frames Frames per timer count.*/
 		sys.curFramesPerCount = int32(numArg(l, 1))
 		return 0
 	})
@@ -6854,8 +6556,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set win count for a team.
 		@function setWinCount
 		@tparam int teamSide Team side (`1` or `2`).
-		@tparam int32 wins Win count.
-		function setWinCount(teamSide, wins) end*/
+		@tparam int32 wins Win count.*/
 		tn := int(numArg(l, 1))
 		if tn < 1 || tn > 2 {
 			l.RaiseError("\nInvalid team side: %v\n", tn)
@@ -6868,8 +6569,7 @@ func systemScriptInit(l *lua.LState) {
 		@function sffNew
 		@tparam[opt] string filename SFF file path. If omitted, an empty SFF is created.
 		@tparam[opt=false] boolean isActPal If `true`, prepare SFFv1 to receive ACT palettes.
-		@treturn Sff sff SFF userdata.
-		function sffNew(filename, isActPal) end*/
+		@treturn Sff sff SFF userdata.*/
 		if !nilArg(l, 1) {
 			isActPal := false
 			if l.GetTop() >= 2 {
@@ -6889,16 +6589,14 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "shutdown", func(*lua.LState) int {
 		/*Check whether shutdown has been requested.
 		@function shutdown
-		@treturn boolean shutdown `true` if the global shutdown flag is set.
-		function shutdown() end*/
+		@treturn boolean shutdown `true` if the global shutdown flag is set.*/
 		l.Push(lua.LBool(sys.gameEnd))
 		return 1
 	})
 	luaRegister(l, "sleep", func(l *lua.LState) int {
 		/*Block the current script for a number of seconds.
 		@function sleep
-		@tparam number seconds Time to sleep, in seconds.
-		function sleep(seconds) end*/
+		@tparam number seconds Time to sleep, in seconds.*/
 		time.Sleep(time.Duration((numArg(l, 1))) * time.Second)
 		return 0
 	})
@@ -6906,8 +6604,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Load a SND file.
 		@function sndNew
 		@tparam string filename SND file path.
-		@treturn Snd snd SND userdata.
-		function sndNew(filename) end*/
+		@treturn Snd snd SND userdata.*/
 		snd, err := LoadSnd(strArg(l, 1))
 		if err != nil {
 			l.RaiseError("\nCan't load %v: %v\n", strArg(l, 1), err.Error())
@@ -6922,11 +6619,11 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int32 group Sound group number.
 		@tparam int32 number Sound number within the group.
 		@tparam[opt=100] int32 volumescale Volume scale (percent).
-		@tparam[opt=0.0] float32 pan Stereo panning (engine-specific range).
+		@tparam[opt=0.0] float32 pan Offset from screen center; negative is left, positive is right.
 		@tparam[opt=0] int loopstart Loop start position.
 		@tparam[opt=0] int loopend Loop end position.
 		@tparam[opt=0] int startposition Start position.
-		function sndPlay(snd, group, number, volumescale, pan, loopstart, loopend, startposition) end*/
+		@tparam[opt=false] boolean keepOnMatchEnd Let this playback finish across the next match-exit cleanup. Explicit sound stops still apply.*/
 		s, ok := toUserData(l, 1).(*Snd)
 		if !ok {
 			userDataError(l, 1, s)
@@ -6949,7 +6646,11 @@ func systemScriptInit(l *lua.LState) {
 		if !nilArg(l, 8) {
 			startposition = int(numArg(l, 8))
 		}
-		s.play([...]int32{int32(numArg(l, 2)), int32(numArg(l, 3))}, volumescale, pan, loopstart, loopend, startposition)
+		keepOnMatchEnd := false
+		if !nilArg(l, 9) {
+			keepOnMatchEnd = boolArg(l, 9)
+		}
+		s.play([...]int32{int32(numArg(l, 2)), int32(numArg(l, 3))}, volumescale, pan, loopstart, loopend, startposition, keepOnMatchEnd)
 		return 0
 	})
 	luaRegister(l, "sndPlaying", func(*lua.LState) int {
@@ -6958,8 +6659,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam Snd snd SND userdata.
 		@tparam int32 group Sound group number.
 		@tparam int32 number Sound number within the group.
-		@treturn boolean playing `true` if the sound is playing.
-		function sndPlaying(snd, group, number) end*/
+		@treturn boolean playing `true` if the sound is playing.*/
 		s, ok := toUserData(l, 1).(*Snd)
 		if !ok {
 			userDataError(l, 1, s)
@@ -6976,8 +6676,7 @@ func systemScriptInit(l *lua.LState) {
 		@function sndStop
 		@tparam Snd snd SND userdata.
 		@tparam int32 group Sound group number.
-		@tparam int32 number Sound number within the group.
-		function sndStop(snd, group, number) end*/
+		@tparam int32 number Sound number within the group.*/
 		s, ok := toUserData(l, 1).(*Snd)
 		if !ok {
 			userDataError(l, 1, s)
@@ -6987,22 +6686,19 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "stopAllCharSounds", func(l *lua.LState) int {
 		/*Stop all character sounds.
-		@function stopAllCharSounds
-		function stopAllCharSounds() end*/
+		@function stopAllCharSounds*/
 		sys.stopAllCharSounds()
 		return 0
 	})
 	luaRegister(l, "stopBgm", func(l *lua.LState) int {
 		/*Stop background music playback.
-		@function stopBgm
-		function stopBgm() end*/
+		@function stopBgm*/
 		sys.bgm.Stop()
 		return 0
 	})
 	luaRegister(l, "stopSnd", func(l *lua.LState) int {
 		/*[redirectable] Stop all character's sounds.
-		@function stopSnd
-		function stopSnd() end*/
+		@function stopSnd*/
 		sys.charSoundChannels[sys.debugWC.playerNo].SetSize(0) // TODO: Why does this use the hard reset?
 		return 0
 	})
@@ -7010,10 +6706,9 @@ func systemScriptInit(l *lua.LState) {
 		/*Synchronize with external systems (e.g. netplay).
 		@function synchronize
 		@treturn boolean success `true` if synchronization succeeded, `false` if a
-		  non-fatal session warning occurred.
-		function synchronize() end*/
+		  non-fatal session warning occurred.*/
 		if err := sys.synchronize(); err != nil {
-			if sys.sessionWarning != "" {
+			if sys.sessionWarning != "" || sys.esc {
 				l.Push(lua.LBool(false))
 				return 1
 			}
@@ -7027,8 +6722,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgAddPos
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam float32 dx X offset to add.
-		@tparam float32 dy Y offset to add.
-		function textImgAddPos(ts, dx, dy) end*/
+		@tparam float32 dy Y offset to add.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7040,8 +6734,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Append text to an existing text sprite.
 		@function textImgAddText
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam string text Text to append (no automatic newline).
-		function textImgAddText(ts, text) end*/
+		@tparam string text Text to append (no automatic newline).*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7053,8 +6746,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Copy velocity settings from another text sprite.
 		@function textImgApplyVel
 		@tparam TextSprite ts Text sprite userdata to modify.
-		@tparam TextSprite source Source text sprite whose velocity is copied.
-		function textImgApplyVel(ts, source) end*/
+		@tparam TextSprite source Source text sprite whose velocity is copied.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7072,8 +6764,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Print debug information about a text sprite.
 		@function textImgDebug
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam[opt] string prefix Optional text printed before the debug info.
-		function textImgDebug(ts, prefix) end*/
+		@tparam[opt] string prefix Optional text printed before the debug info.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7089,8 +6780,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Queue drawing of a text sprite.
 		@function textImgDraw
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam[opt] int16 layer Layer to draw on (defaults to `ts.layerno`).
-		function textImgDraw(ts, layer) end*/
+		@tparam[opt] int16 layer Layer to draw on (defaults to `ts.layerno`).*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7113,8 +6803,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgGetTextWidth
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam string text Text to measure.
-		@treturn int32 width Width of the rendered text in pixels.
-		function textImgGetTextWidth(ts, text) end*/
+		@treturn int32 width Width of the rendered text in pixels.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7125,8 +6814,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "textImgNew", func(*lua.LState) int {
 		/*Create a new empty text sprite.
 		@function textImgNew
-		@treturn TextSprite ts Newly created text sprite userdata.
-		function textImgNew() end*/
+		@treturn TextSprite ts Newly created text sprite userdata.*/
 		l.Push(newUserData(l, NewTextSprite()))
 		return 1
 	})
@@ -7142,8 +6830,7 @@ func systemScriptInit(l *lua.LState) {
 		  - `"velocity"` – reset velocity to initial
 		  - `"text"` – reset text to initial
 		  - `"palfx"` – clear PalFX
-		  - `"delay"` – reset text delay timer
-		function textImgReset(ts, parts) end*/
+		  - `"delay"` – reset text delay timer*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7189,8 +6876,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgSetAccel
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam float32 ax X acceleration.
-		@tparam float32 ay Y acceleration.
-		function textImgSetAccel(ts, ax, ay) end*/
+		@tparam float32 ay Y acceleration.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7202,8 +6888,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set text alignment for a text sprite.
 		@function textImgSetAlign
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam int32 align Alignment value (engine-specific constants, e.g. left/center/right).
-		function textImgSetAlign(ts, align) end*/
+		@tparam int32 align Alignment value (engine-specific constants, e.g. left/center/right).*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7215,8 +6900,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set rotation angle for a text sprite.
 		@function textImgSetAngle
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam float32 angle Rotation angle in degrees.
-		function textImgSetAngle(ts, angle) end*/
+		@tparam float32 angle Rotation angle in degrees.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7228,8 +6912,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the font bank index for a text sprite.
 		@function textImgSetBank
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam int32 bank Font bank index.
-		function textImgSetBank(ts, bank) end*/
+		@tparam int32 bank Font bank index.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7244,8 +6927,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int32 r Red component (0–255).
 		@tparam int32 g Green component (0–255).
 		@tparam int32 b Blue component (0–255).
-		@tparam[opt=255] int32 a Alpha component (0–255).
-		function textImgSetColor(ts, r, g, b, a) end*/
+		@tparam[opt=255] int32 a Alpha component (0–255).*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7262,8 +6944,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set focal length used for perspective projection on a text sprite.
 		@function textImgSetFocalLength
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam float32 fLength Focal length value.
-		function textImgSetFocalLength(ts, fLength) end*/
+		@tparam float32 fLength Focal length value.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7275,8 +6956,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Assign a font object to a text sprite.
 		@function textImgSetFont
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam Fnt fnt Font userdata to use.
-		function textImgSetFont(ts, fnt) end*/
+		@tparam Fnt fnt Font userdata to use.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7293,8 +6973,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgSetFriction
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam float32 fx X friction factor.
-		@tparam float32 fy Y friction factor.
-		function textImgSetFriction(ts, fx, fy) end*/
+		@tparam float32 fy Y friction factor.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7307,8 +6986,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the drawing layer for a text sprite.
 		@function textImgSetLayerno
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam int16 layer Layer number.
-		function textImgSetLayerno(ts, layer) end*/
+		@tparam int16 layer Layer number.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7321,8 +6999,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgSetLocalcoord
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam float32 width Local coordinate width.
-		@tparam float32 height Local coordinate height.
-		function textImgSetLocalcoord(ts, width, height) end*/
+		@tparam float32 height Local coordinate height.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7335,8 +7012,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgSetMaxDist
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam float32 xDist Maximum X distance.
-		@tparam float32 yDist Maximum Y distance.
-		function textImgSetMaxDist(ts, xDist, yDist) end*/
+		@tparam float32 yDist Maximum Y distance.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7349,8 +7025,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgSetPos
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam[opt] float32 x X position; if omitted, uses the initial X offset.
-		@tparam[opt] float32 y Y position; if omitted, uses the initial Y offset.
-		function textImgSetPos(ts, x, y) end*/
+		@tparam[opt] float32 y Y position; if omitted, uses the initial Y offset.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7372,8 +7047,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int32|string projection Projection mode. Can be a numeric engine constant, or one of:
 		  - `"orthographic"`
 		  - `"perspective"`
-		  - `"perspective2"`
-		function textImgSetProjection(ts, projection) end*/
+		  - `"perspective2"`*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7400,8 +7074,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgSetScale
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam float32 sx X scale.
-		@tparam float32 sy Y scale.
-		function textImgSetScale(ts, sx, sy) end*/
+		@tparam float32 sy Y scale.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7413,21 +7086,22 @@ func systemScriptInit(l *lua.LState) {
 		/*Set the text content of a text sprite.
 		@function textImgSetText
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam string text Text to display.
-		function textImgSetText(ts, text) end*/
+		@tparam string text Text to display.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
 		}
 		ts.text = strArg(l, 2)
+		if ts.textWrap {
+			ts.wrapText(ts.text, len([]rune(ts.text)))
+		}
 		return 0
 	})
 	luaRegister(l, "textImgSetTextDelay", func(*lua.LState) int {
 		/*Set per-character text delay for a text sprite.
 		@function textImgSetTextDelay
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam float32 delay Delay between characters (frames, engine-specific).
-		function textImgSetTextDelay(ts, delay) end*/
+		@tparam float32 delay Delay between characters (frames, engine-specific).*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7440,8 +7114,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgSetTextSpacing
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam float32 xSpacing Horizontal text spacing.
-		@tparam float32 ySpacing Vertical text spacing.
-		function textImgSetTextSpacing(ts, xSpacing, ySpacing) end*/
+		@tparam float32 ySpacing Vertical text spacing.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7453,8 +7126,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Enable or disable word wrapping for a text sprite.
 		@function textImgSetTextWrap
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam boolean wrap If `true`, enables text wrapping.
-		function textImgSetTextWrap(ts, wrap) end*/
+		@tparam boolean wrap If `true`, enables text wrapping.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7467,8 +7139,7 @@ func systemScriptInit(l *lua.LState) {
 		@function textImgSetVelocity
 		@tparam TextSprite ts Text sprite userdata.
 		@tparam float32 vx X velocity.
-		@tparam float32 vy Y velocity.
-		function textImgSetVelocity(ts, vx, vy) end*/
+		@tparam float32 vy Y velocity.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7483,8 +7154,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam float32 x1 Left coordinate.
 		@tparam float32 y1 Top coordinate.
 		@tparam float32 x2 Right coordinate.
-		@tparam float32 y2 Bottom coordinate.
-		function textImgSetWindow(ts, x1, y1, x2, y2) end*/
+		@tparam float32 y2 Bottom coordinate.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7496,8 +7166,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set rotation angle around the X axis for a text sprite.
 		@function textImgSetXAngle
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam float32 xangle X-axis rotation angle.
-		function textImgSetXAngle(ts, xangle) end*/
+		@tparam float32 xangle X-axis rotation angle.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7509,8 +7178,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set X shear (italic-style slant) for a text sprite.
 		@function textImgSetXShear
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam float32 xshear Shear value along X.
-		function textImgSetXShear(ts, xshear) end*/
+		@tparam float32 xshear Shear value along X.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7522,8 +7190,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Set rotation angle around the Y axis for a text sprite.
 		@function textImgSetYAngle
 		@tparam TextSprite ts Text sprite userdata.
-		@tparam float32 yangle Y-axis rotation angle.
-		function textImgSetYAngle(ts, yangle) end*/
+		@tparam float32 yangle Y-axis rotation angle.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7535,8 +7202,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "textImgUpdate", func(*lua.LState) int {
 		/*Update a text sprite's internal state (position, delays, etc.).
 		@function textImgUpdate
-		@tparam TextSprite ts Text sprite userdata.
-		function textImgUpdate(ts) end*/
+		@tparam TextSprite ts Text sprite userdata.*/
 		ts, ok := toUserData(l, 1).(*TextSprite)
 		if !ok {
 			userDataError(l, 1, ts)
@@ -7547,8 +7213,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "toggleClsnDisplay", func(*lua.LState) int {
 		/*Toggle display of collision boxes.
 		@function toggleClsnDisplay
-		@tparam[opt] boolean state If provided, sets collision box display on/off; otherwise toggles it.
-		function toggleClsnDisplay(state) end*/
+		@tparam[opt] boolean state If provided, sets collision box display on/off; otherwise toggles it.*/
 		if !sys.debugModeAllowed() {
 			return 0
 		}
@@ -7563,8 +7228,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Toggle or cycle debug display.
 		@function toggleDebugDisplay
 		@tparam[opt] any mode If provided, simply toggles the debug display.
-		  If omitted, cycles the debug display through characters and eventually disables it.
-		function toggleDebugDisplay(dummy) end*/
+		  If omitted, cycles the debug display through characters and eventually disables it.*/
 		if !sys.debugModeAllowed() {
 			return 0
 		}
@@ -7639,8 +7303,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "toggleFullscreen", func(*lua.LState) int {
 		/*Toggle fullscreen mode.
 		@function toggleFullscreen
-		@tparam[opt] boolean state If provided, sets fullscreen on/off; otherwise toggles it.
-		function toggleFullscreen(state) end*/
+		@tparam[opt] boolean state If provided, sets fullscreen on/off; otherwise toggles it.*/
 		fs := !sys.window.fullscreen
 		if !nilArg(l, 1) {
 			fs = boolArg(l, 1)
@@ -7653,8 +7316,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "toggleLifebarDisplay", func(*lua.LState) int {
 		/*Toggle lifebar visibility.
 		@function toggleLifebarDisplay
-		@tparam[opt] boolean hide If provided, hides (`true`) or shows (`false`) the lifebar; otherwise toggles.
-		function toggleLifebarDisplay(hide) end*/
+		@tparam[opt] boolean hide If provided, hides (`true`) or shows (`false`) the lifebar; otherwise toggles.*/
 		if !nilArg(l, 1) {
 			sys.lifebarHide = boolArg(l, 1)
 		} else {
@@ -7666,8 +7328,7 @@ func systemScriptInit(l *lua.LState) {
 		/*Toggle "max power" cheat mode.
 		@function toggleMaxPowerMode
 		@tparam[opt] boolean state If provided, sets max power mode on/off; otherwise toggles it.
-		  When enabled, all root players' power is set to their maximum.
-		function toggleMaxPowerMode(state) end*/
+		  When enabled, all root players' power is set to their maximum.*/
 		if !nilArg(l, 1) {
 			sys.maxPowerMode = boolArg(l, 1)
 		} else {
@@ -7685,8 +7346,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "toggleNoSound", func(*lua.LState) int {
 		/*Toggle global sound output.
 		@function toggleNoSound
-		@tparam[opt] boolean state If provided, sets mute on/off; otherwise toggles it.
-		function toggleNoSound(state) end*/
+		@tparam[opt] boolean state If provided, sets mute on/off; otherwise toggles it.*/
 		if !nilArg(l, 1) {
 			sys.noCharSoundFlg = boolArg(l, 1)
 		} else {
@@ -7697,8 +7357,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "togglePause", func(*lua.LState) int {
 		/*Toggle game pause.
 		@function togglePause
-		@tparam[opt] boolean state If provided, sets pause on/off; otherwise toggles it.
-		function togglePause(state) end*/
+		@tparam[opt] boolean state If provided, sets pause on/off; otherwise toggles it.*/
 		if !nilArg(l, 1) {
 			sys.paused = boolArg(l, 1)
 		} else {
@@ -7709,8 +7368,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "togglePlayer", func(*lua.LState) int {
 		/*Enable or disable all instances of a given player.
 		@function togglePlayer
-		@tparam int32 playerNo Player number (1-based).
-		function togglePlayer(playerNo) end*/
+		@tparam int32 playerNo Player number (1-based).*/
 		pn := int(numArg(l, 1))
 		if pn < 1 || pn > len(sys.chars) || len(sys.chars[pn-1]) == 0 {
 			return 0
@@ -7727,8 +7385,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "toggleVSync", func(*lua.LState) int {
 		/*Toggle vertical sync (VSync).
 		@function toggleVSync
-		@tparam[opt] int mode If provided, sets the swap interval directly; otherwise toggles between `0` and `1`.
-		function toggleVSync(mode) end*/
+		@tparam[opt] int mode If provided, sets the swap interval directly; otherwise toggles between `0` and `1`.*/
 		if !nilArg(l, 1) {
 			sys.cfg.Video.VSync = int(numArg(l, 1))
 		} else if sys.cfg.Video.VSync == 0 {
@@ -7742,8 +7399,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "toggleWireframeDisplay", func(*lua.LState) int {
 		/*Toggle wireframe rendering mode (debug only).
 		@function toggleWireframeDisplay
-		@tparam[opt] boolean state If provided, sets wireframe display on/off; otherwise toggles it.
-		function toggleWireframeDisplay(state) end*/
+		@tparam[opt] boolean state If provided, sets wireframe display on/off; otherwise toggles it.*/
 		if !sys.debugModeAllowed() {
 			return 0
 		}
@@ -7756,8 +7412,7 @@ func systemScriptInit(l *lua.LState) {
 	})
 	luaRegister(l, "updateVolume", func(l *lua.LState) int {
 		/*Update background music volume to match current settings.
-		@function updateVolume
-		function updateVolume() end*/
+		@function updateVolume*/
 		sys.bgm.UpdateVolume()
 		return 0
 	})
@@ -7767,8 +7422,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int palReq Requested palette number (1-based).
 		@tparam int charRef 0-based character index in the select list.
 		@treturn int validPal Engine-validated palette number (may differ from `palReq`
-		  depending on character configuration).
-		function validatePal(palReq, charRef) end*/
+		  depending on character configuration).*/
 		palReq := int(numArg(l, 1))
 		charRef := int(numArg(l, 2))
 		valid := sys.sel.ValidatePalette(charRef, palReq)
@@ -7778,8 +7432,7 @@ func systemScriptInit(l *lua.LState) {
 	luaRegister(l, "version", func(l *lua.LState) int {
 		/*Get the engine version string.
 		@function version
-		@treturn string ver Engine version and build time.
-		function version() end*/
+		@treturn string ver Engine version and build time.*/
 		ver := fmt.Sprintf("%s - %s", Version, BuildTime)
 		l.Push(lua.LString(ver))
 		return 1
@@ -7791,8 +7444,7 @@ func systemScriptInit(l *lua.LState) {
 		@tparam int32 group Group number in the SND.
 		@tparam int32 sound Sound number in the SND.
 		@tparam[opt=0] uint32 max Maximum scan limit passed to SND loading. If non-zero, loading stops after the first matching entry and also gives up after scanning that many entries without a match.
-		@treturn Sound sound Sound userdata containing the loaded sound data.
-		function waveNew(path, group, sound, maxLoops) end*/
+		@treturn Sound sound Sound userdata containing the loaded sound data.*/
 		var max uint32
 		if !nilArg(l, 4) {
 			max = uint32(numArg(l, 4))
@@ -7809,8 +7461,7 @@ func systemScriptInit(l *lua.LState) {
 		@function wavePlay
 		@tparam Sound s Sound userdata.
 		@tparam[opt=0] int32 group Optional group number.
-		@tparam[opt=0] int32 number Optional sound number within the group.
-		function wavePlay(s, group, number) end*/
+		@tparam[opt=0] int32 number Optional sound number within the group.*/
 		s, ok := toUserData(l, 1).(*Sound)
 		if !ok {
 			userDataError(l, 1, s)
@@ -8002,7 +7653,7 @@ func triggerFunctions(l *lua.LState) {
 	})
 	luaRegister(l, "angle", func(*lua.LState) int {
 		if sys.debugWC.csf(CSF_angledraw) {
-			l.Push(lua.LNumber(sys.debugWC.anglerot[0]))
+			l.Push(lua.LNumber(sys.debugWC.rot.angle))
 		} else {
 			l.Push(lua.LNumber(0))
 		}
@@ -8072,6 +7723,14 @@ func triggerFunctions(l *lua.LState) {
 		l.Push(lua.LNumber(sys.debugWC.anim.totaltime))
 		return 1
 	})
+	luaRegister(l, "animLoopCount", func(*lua.LState) int {
+		if sys.debugWC.anim == nil {
+			l.Push(lua.LNumber(0))
+		} else {
+			l.Push(lua.LNumber(sys.debugWC.anim.loopcount))
+		}
+		return 1
+	})
 	luaRegister(l, "animPlayerNo", func(*lua.LState) int {
 		l.Push(lua.LNumber(sys.debugWC.animPN + 1))
 		return 1
@@ -8139,6 +7798,8 @@ func triggerFunctions(l *lua.LState) {
 					}
 				case "position":
 					ln = lua.LNumber(int32(sys.bgm.streamer.Position()))
+				case "samplerate":
+					ln = lua.LNumber(float32(sys.bgm.sampleRate))
 				case "startposition":
 					ln = lua.LNumber(int32(sys.bgm.startPos))
 				case "volume":
@@ -8223,19 +7884,19 @@ func triggerFunctions(l *lua.LState) {
 		getClsnCoord := func(offset int) {
 			switch c {
 			case "clsn1":
-				clsn := sys.debugWC.getClsn(1)
+				clsn := sys.debugWC.getClsnLocal(1)
 				if clsn != nil && idx >= 0 && idx < len(clsn) {
-					v = lua.LNumber(clsn[idx][offset])
+					v = lua.LNumber(clsn[idx].rect[offset])
 				}
 			case "clsn2":
-				clsn := sys.debugWC.getClsn(2)
+				clsn := sys.debugWC.getClsnLocal(2)
 				if clsn != nil && idx >= 0 && idx < len(clsn) {
-					v = lua.LNumber(clsn[idx][offset])
+					v = lua.LNumber(clsn[idx].rect[offset])
 				}
 			case "size":
-				clsn := sys.debugWC.getClsn(3)
+				clsn := sys.debugWC.getClsnLocal(3)
 				if clsn != nil && len(clsn) > 0 {
-					v = lua.LNumber(clsn[idx][offset])
+					v = lua.LNumber(clsn[idx].rect[offset])
 				}
 			}
 		}
@@ -8266,7 +7927,7 @@ func triggerFunctions(l *lua.LState) {
 	})
 	luaRegister(l, "const", func(*lua.LState) int {
 		c := sys.debugWC
-		var ln lua.LNumber
+		var ln lua.LValue
 		switch strings.ToLower(strArg(l, 1)) {
 		case "data.life":
 			ln = lua.LNumber(c.gi().data.life)
@@ -8524,7 +8185,12 @@ func triggerFunctions(l *lua.LState) {
 		case "movement.down.friction.threshold":
 			ln = lua.LNumber(c.gi().movement.down.friction_threshold)
 		default:
-			ln = lua.LNumber(c.gi().constants[strings.ToLower(strArg(l, 1))])
+			mv := c.gi().constants[strings.ToLower(strArg(l, 1))]
+			if mv.Type == VT_String {
+				ln = lua.LString(mv.Str)
+			} else {
+				ln = lua.LNumber(mv.Num)
+			}
 		}
 		l.Push(ln)
 		return 1
@@ -8655,11 +8321,11 @@ func triggerFunctions(l *lua.LState) {
 			case "anim":
 				lv = lua.LNumber(e.animNo)
 			case "angle":
-				lv = lua.LNumber(e.anglerot[0] + e.interpolate_angle[0])
+				lv = lua.LNumber(e.rot.angle + e.interpolate_rot[0].angle)
 			case "angle x":
-				lv = lua.LNumber(e.anglerot[1] + e.interpolate_angle[1])
+				lv = lua.LNumber(e.rot.xangle + e.interpolate_rot[0].xangle)
 			case "angle y":
-				lv = lua.LNumber(e.anglerot[2] + e.interpolate_angle[2])
+				lv = lua.LNumber(e.rot.yangle + e.interpolate_rot[0].yangle)
 			case "animelem":
 				lv = lua.LNumber(e.anim.curelem + 1)
 			case "animelemtime":
@@ -8893,13 +8559,13 @@ func triggerFunctions(l *lua.LState) {
 		case "hittime":
 			lv = lua.LNumber(c.ghv.hittime)
 		case "stand.friction":
-			sf := c.ghv.standfriction
+			sf := c.ghv.stand_friction
 			if math.IsNaN(float64(sf)) {
 				sf = c.gi().movement.stand.friction
 			}
 			lv = lua.LNumber(sf)
 		case "crouch.friction":
-			cf := c.ghv.crouchfriction
+			cf := c.ghv.crouch_friction
 			if math.IsNaN(float64(cf)) {
 				cf = c.gi().movement.crouch.friction
 			}
@@ -8959,7 +8625,7 @@ func triggerFunctions(l *lua.LState) {
 		case "fall.recover":
 			lv = lua.LBool(c.ghv.fall_recover)
 		case "fall.time":
-			lv = lua.LNumber(c.fallTime)
+			lv = lua.LNumber(c.ghv.fall_time)
 		case "fall.recovertime":
 			lv = lua.LNumber(c.ghv.fall_recovertime)
 		case "fall.kill":
@@ -8981,7 +8647,7 @@ func triggerFunctions(l *lua.LState) {
 		case "fall.envshake.decay":
 			lv = lua.LNumber(c.ghv.fall_envshake_decay)
 		case "attr":
-			lv = attrLStr(c.ghv.attr)
+			lv = lua.LString(attrString(c.ghv.attr))
 		case "dizzypoints":
 			lv = lua.LNumber(c.ghv.dizzypoints)
 		case "guardpoints":
@@ -9047,13 +8713,17 @@ func triggerFunctions(l *lua.LState) {
 		case "down.recover":
 			lv = lua.LBool(c.ghv.down_recover)
 		case "guardflag":
-			lv = flagLStr(c.ghv.guardflag)
+			lv = lua.LString(flagString(c.ghv.guardflag))
 		case "keepstate":
 			lv = lua.LBool(c.ghv.keepstate)
 		case "projid":
 			lv = lua.LNumber(c.ghv.projid)
 		case "guardko":
 			lv = lua.LBool(c.ghv.guardko)
+		case "sparkx":
+			lv = lua.LNumber(c.ghv.sparkxy[0])
+		case "sparky":
+			lv = lua.LNumber(c.ghv.sparkxy[1])
 		default:
 			l.RaiseError("\nInvalid argument: %v\n", strArg(l, 1))
 		}
@@ -9185,11 +8855,7 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "hitDefAttr", func(*lua.LState) int {
-		if sys.debugWC.ss.moveType == MT_A {
-			l.Push(attrLStr(sys.debugWC.hitdef.attr))
-		} else {
-			l.Push(lua.LString(""))
-		}
+		l.Push(lua.LString(attrString(sys.debugWC.hitdef.attr)))
 		return 1
 	})
 	luaRegister(l, "hitDefVar", func(*lua.LState) int {
@@ -9216,7 +8882,7 @@ func triggerFunctions(l *lua.LState) {
 		case "guarddamage":
 			l.Push(lua.LNumber(c.hitdef.guarddamage))
 		case "guardflag":
-			l.Push(flagLStr(c.hitdef.guardflag))
+			l.Push(lua.LString(flagString(c.hitdef.guardflag)))
 		case "guardsound.group":
 			l.Push(lua.LNumber(c.hitdef.guardsound[0]))
 		case "guardsound.number":
@@ -9224,7 +8890,7 @@ func triggerFunctions(l *lua.LState) {
 		case "hitdamage":
 			l.Push(lua.LNumber(c.hitdef.hitdamage))
 		case "hitflag":
-			l.Push(flagLStr(c.hitdef.hitflag))
+			l.Push(lua.LString(flagString(c.hitdef.hitflag)))
 		case "hitsound.group":
 			l.Push(lua.LNumber(c.hitdef.hitsound[0]))
 		case "hitsound.number":
@@ -9368,6 +9034,10 @@ func triggerFunctions(l *lua.LState) {
 	})
 	luaRegister(l, "inGuardDist", func(*lua.LState) int {
 		l.Push(lua.LBool(sys.debugWC.inguarddist))
+		return 1
+	})
+	luaRegister(l, "inRunState", func(*lua.LState) int {
+		l.Push(lua.LBool(sys.debugWC.inRunState))
 		return 1
 	})
 	luaRegister(l, "inputTime", func(l *lua.LState) int {
@@ -9668,7 +9338,12 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "map", func(*lua.LState) int {
-		l.Push(lua.LNumber(sys.debugWC.mapArray[strings.ToLower(strArg(l, 1))]))
+		mv := sys.debugWC.mapArray[strings.ToLower(strArg(l, 1))]
+		if mv.Type == VT_String {
+			l.Push(lua.LString(mv.Str))
+		} else {
+			l.Push(lua.LNumber(mv.Num))
+		}
 		return 1
 	})
 	luaRegister(l, "matchNo", func(*lua.LState) int {
@@ -9740,6 +9415,8 @@ func triggerFunctions(l *lua.LState) {
 		c := sys.debugWC
 		var lv lua.LValue
 		switch strings.ToLower(strArg(l, 1)) {
+		case "cornerpush.velmul":
+			lv = lua.LNumber(c.mhv.cornerpush_velmul)
 		case "cornerpush.veloff":
 			lv = lua.LNumber(c.mhv.cornerpush_veloff)
 		case "frame":
@@ -9769,15 +9446,7 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "moveType", func(*lua.LState) int {
-		var s string
-		switch sys.debugWC.ss.moveType {
-		case MT_I:
-			s = "I"
-		case MT_A:
-			s = "A"
-		case MT_H:
-			s = "H"
-		}
+		s := sys.debugWC.ss.moveType.TriggerValue()
 		l.Push(lua.LString(s))
 		return 1
 	})
@@ -9924,15 +9593,7 @@ func triggerFunctions(l *lua.LState) {
 	})
 	luaRegister(l, "p2MoveType", func(*lua.LState) int {
 		if p2 := sys.debugWC.p2(); p2 != nil {
-			var s string
-			switch p2.ss.moveType {
-			case MT_I:
-				s = "I"
-			case MT_A:
-				s = "A"
-			case MT_H:
-				s = "H"
-			}
+			s := p2.ss.moveType.TriggerValue()
 			l.Push(lua.LString(s))
 		} else {
 			l.Push(lua.LString(""))
@@ -9949,17 +9610,7 @@ func triggerFunctions(l *lua.LState) {
 	})
 	luaRegister(l, "p2StateType", func(*lua.LState) int {
 		if p2 := sys.debugWC.p2(); p2 != nil {
-			var s string
-			switch p2.ss.stateType {
-			case ST_S:
-				s = "S"
-			case ST_C:
-				s = "C"
-			case ST_A:
-				s = "A"
-			case ST_L:
-				s = "L"
-			}
+			s := p2.ss.stateType.TriggerValue()
 			l.Push(lua.LString(s))
 		} else {
 			l.Push(lua.LString(""))
@@ -10064,17 +9715,7 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "physics", func(*lua.LState) int {
-		var s string
-		switch sys.debugWC.ss.physics {
-		case ST_S:
-			s = "S"
-		case ST_C:
-			s = "C"
-		case ST_A:
-			s = "A"
-		case ST_N:
-			s = "N"
-		}
+		s := sys.debugWC.ss.physics.TriggerValue()
 		l.Push(lua.LString(s))
 		return 1
 	})
@@ -10122,15 +9763,7 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "prevMoveType", func(*lua.LState) int {
-		var s string
-		switch sys.debugWC.ss.prevMoveType {
-		case MT_I:
-			s = "I"
-		case MT_A:
-			s = "A"
-		case MT_H:
-			s = "H"
-		}
+		s := sys.debugWC.ss.prevMoveType.TriggerValue()
 		l.Push(lua.LString(s))
 		return 1
 	})
@@ -10139,17 +9772,7 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "prevStateType", func(*lua.LState) int {
-		var s string
-		switch sys.debugWC.ss.prevStateType {
-		case ST_S:
-			s = "S"
-		case ST_C:
-			s = "C"
-		case ST_A:
-			s = "A"
-		case ST_L:
-			s = "L"
-		}
+		s := sys.debugWC.ss.prevStateType.TriggerValue()
 		l.Push(lua.LString(s))
 		return 1
 	})
@@ -10218,13 +9841,13 @@ func triggerFunctions(l *lua.LState) {
 			case "animelem":
 				lv = lua.LNumber(p.anim.curelem + 1)
 			case "angle":
-				lv = lua.LNumber(p.anglerot[0])
+				lv = lua.LNumber(p.rot.angle)
 			case "angle x":
-				lv = lua.LNumber(p.anglerot[1])
+				lv = lua.LNumber(p.rot.xangle)
 			case "angle y":
-				lv = lua.LNumber(p.anglerot[2])
+				lv = lua.LNumber(p.rot.yangle)
 			case "attr":
-				lv = attrLStr(p.hitdef.attr) // Return string like HitDefAttr
+				lv = lua.LString(attrString(p.hitdef.attr)) // Return string like HitDefAttr
 			case "drawpal group":
 				lv = lua.LNumber(sys.debugWC.projDrawPal(p)[0])
 			case "drawpal index":
@@ -10232,11 +9855,11 @@ func triggerFunctions(l *lua.LState) {
 			case "facing":
 				lv = lua.LNumber(p.facing)
 			case "guardflag":
-				lv = flagLStr(p.hitdef.guardflag) // Return string like HitDefVar
+				lv = lua.LString(flagString(p.hitdef.guardflag)) // Return string like HitDefVar
 			case "highbound":
 				lv = lua.LNumber(p.heightbound[1])
 			case "hitflag":
-				lv = flagLStr(p.hitdef.hitflag) // Return string like HitDefVar
+				lv = lua.LString(flagString(p.hitdef.hitflag)) // Return string like HitDefVar
 			case "lowbound":
 				lv = lua.LNumber(p.heightbound[0])
 			case "pausemovetime":
@@ -10334,45 +9957,7 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "reversalDefAttr", func(*lua.LState) int {
-		attr, str := sys.debugWC.hitdef.reversal_attr, ""
-		if sys.debugWC.ss.moveType == MT_A {
-			if attr&int32(ST_S) != 0 {
-				str += "S"
-			}
-			if attr&int32(ST_C) != 0 {
-				str += "C"
-			}
-			if attr&int32(ST_A) != 0 {
-				str += "A"
-			}
-			if attr&int32(AT_NA) != 0 {
-				str += ", NA"
-			}
-			if attr&int32(AT_NT) != 0 {
-				str += ", NT"
-			}
-			if attr&int32(AT_NP) != 0 {
-				str += ", NP"
-			}
-			if attr&int32(AT_SA) != 0 {
-				str += ", SA"
-			}
-			if attr&int32(AT_ST) != 0 {
-				str += ", ST"
-			}
-			if attr&int32(AT_SP) != 0 {
-				str += ", SP"
-			}
-			if attr&int32(AT_HA) != 0 {
-				str += ", HA"
-			}
-			if attr&int32(AT_HT) != 0 {
-				str += ", HT"
-			}
-			if attr&int32(AT_HP) != 0 {
-				str += ", HP"
-			}
-		}
+		str := attrString(sys.debugWC.hitdef.reversal_attr &^ (-1 << 31))
 		l.Push(lua.LString(str))
 		return 1
 	})
@@ -10555,6 +10140,8 @@ func triggerFunctions(l *lua.LState) {
 				}
 			case "priority":
 				lv = lua.LNumber(ch.sfx.priority)
+			case "samplerate":
+				lv = lua.LNumber(float32(ch.sound.format.SampleRate))
 			case "startposition":
 				lv = lua.LNumber(ch.sfx.startPos)
 			case "volumescale":
@@ -10565,6 +10152,10 @@ func triggerFunctions(l *lua.LState) {
 			}
 		}
 		l.Push(lv)
+		return 1
+	})
+	luaRegister(l, "spritePlayerNo", func(*lua.LState) int {
+		l.Push(lua.LNumber(sys.debugWC.spritePN + 1))
 		return 1
 	})
 	luaRegister(l, "spriteVar", func(l *lua.LState) int {
@@ -10617,6 +10208,14 @@ func triggerFunctions(l *lua.LState) {
 			switch strings.ToLower(vname) {
 			case "actionno":
 				ln = lua.LNumber(bg.actionno)
+			case "animelem":
+				ln = lua.LNumber(bg.anim.curelem)
+			case "animelemtime":
+				ln = lua.LNumber(bg.anim.curelemtime)
+			case "animloopcount":
+				ln = lua.LNumber(bg.anim.loopcount)
+			case "animtime":
+				ln = lua.LNumber(bg.anim.AnimTime())
 			case "delta.x":
 				ln = lua.LNumber(bg.delta[0])
 			case "delta.y":
@@ -10649,7 +10248,12 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "stageConst", func(*lua.LState) int {
-		l.Push(lua.LNumber(sys.stage.constants[strings.ToLower(strArg(l, 1))]))
+		mv := sys.stage.constants[strings.ToLower(strArg(l, 1))]
+		if mv.Type == VT_String {
+			l.Push(lua.LString(mv.Str))
+		} else {
+			l.Push(lua.LNumber(mv.Num))
+		}
 		return 1
 	})
 	luaRegister(l, "stageFrontEdgeDist", func(*lua.LState) int {
@@ -10686,6 +10290,10 @@ func triggerFunctions(l *lua.LState) {
 			l.Push(lua.LNumber(sys.stage.stageCamera.boundhigh))
 		case "camera.boundlow":
 			l.Push(lua.LNumber(sys.stage.stageCamera.boundlow))
+		case "camera.zboundtop":
+			l.Push(lua.LNumber(sys.stage.stageCamera.zboundtop))
+		case "camera.zboundbot":
+			l.Push(lua.LNumber(sys.stage.stageCamera.zboundbot))
 		case "camera.verticalfollow":
 			l.Push(lua.LNumber(sys.stage.stageCamera.verticalfollow))
 		case "camera.floortension":
@@ -10696,8 +10304,12 @@ func triggerFunctions(l *lua.LState) {
 			l.Push(lua.LNumber(sys.stage.stageCamera.tensionlow))
 		case "camera.tension":
 			l.Push(lua.LNumber(sys.stage.stageCamera.tension))
+		case "camera.ztension":
+			l.Push(lua.LNumber(sys.stage.stageCamera.ztension))
 		case "camera.tensionvel":
 			l.Push(lua.LNumber(sys.stage.stageCamera.tensionvel))
+		case "camera.ztensionvel":
+			l.Push(lua.LNumber(sys.stage.stageCamera.ztensionvel))
 		case "camera.cuthigh":
 			l.Push(lua.LNumber(sys.stage.stageCamera.cuthigh))
 		case "camera.cutlow":
@@ -10720,6 +10332,8 @@ func triggerFunctions(l *lua.LState) {
 			l.Push(lua.LBool(sys.stage.stageCamera.ytensionenable))
 		case "camera.autocenter":
 			l.Push(lua.LBool(sys.stage.stageCamera.autocenter))
+		case "camera.zautocenter":
+			l.Push(lua.LBool(sys.stage.stageCamera.zautocenter))
 		case "camera.lowestcap":
 			l.Push(lua.LBool(sys.stage.stageCamera.lowestcap))
 		case "playerinfo.leftbound":
@@ -10753,7 +10367,7 @@ func triggerFunctions(l *lua.LState) {
 		case "scaling.topscale":
 			l.Push(lua.LNumber(sys.stage.stageCamera.ztopscale))
 		case "scaling.botscale":
-			l.Push(lua.LNumber(sys.stage.stageCamera.ztopscale))
+			l.Push(lua.LNumber(sys.stage.stageCamera.zbotscale))
 		case "bound.screenleft":
 			l.Push(lua.LNumber(sys.stage.screenleft))
 		case "bound.screenright":
@@ -10832,17 +10446,7 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "stateType", func(*lua.LState) int {
-		var s string
-		switch sys.debugWC.ss.stateType {
-		case ST_S:
-			s = "S"
-		case ST_C:
-			s = "C"
-		case ST_A:
-			s = "A"
-		case ST_L:
-			s = "L"
-		}
+		s := sys.debugWC.ss.stateType.TriggerValue()
 		l.Push(lua.LString(s))
 		return 1
 	})
@@ -10859,17 +10463,7 @@ func triggerFunctions(l *lua.LState) {
 		return 1
 	})
 	luaRegister(l, "teamMode", func(*lua.LState) int {
-		var s string
-		switch sys.tmode[sys.debugWC.playerNo&1] {
-		case TM_Single:
-			s = "single"
-		case TM_Simul:
-			s = "simul"
-		case TM_Turns:
-			s = "turns"
-		case TM_Tag:
-			s = "tag"
-		}
+		s := sys.tmode[sys.debugWC.playerNo&1].TriggerValue()
 		l.Push(lua.LString(s))
 		return 1
 	})
@@ -10967,7 +10561,7 @@ func triggerFunctions(l *lua.LState) {
 	})
 	luaRegister(l, "xAngle", func(*lua.LState) int {
 		if sys.debugWC.csf(CSF_angledraw) {
-			l.Push(lua.LNumber(sys.debugWC.anglerot[1]))
+			l.Push(lua.LNumber(sys.debugWC.rot.xangle))
 		} else {
 			l.Push(lua.LNumber(0))
 		}
@@ -10979,7 +10573,7 @@ func triggerFunctions(l *lua.LState) {
 	})
 	luaRegister(l, "yAngle", func(*lua.LState) int {
 		if sys.debugWC.csf(CSF_angledraw) {
-			l.Push(lua.LNumber(sys.debugWC.anglerot[2]))
+			l.Push(lua.LNumber(sys.debugWC.rot.yangle))
 		} else {
 			l.Push(lua.LNumber(0))
 		}
@@ -11006,4 +10600,10 @@ func triggerFunctions(l *lua.LState) {
 		l.Push(ln)
 		return 1
 	})
+}
+
+// Builds the retry prompt shown when RetryLoadOnError is enabled
+func retryLoadMessage(err error) string {
+	return strings.TrimSpace(err.Error()) + "\n\nThe file could not be loaded because of the error above.\n" +
+		"This error may be recoverable. Have you fixed the file and want to retry?"
 }

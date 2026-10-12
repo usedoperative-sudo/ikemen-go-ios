@@ -2,25 +2,30 @@
 
 An iOS port of [Ikemen GO](https://github.com/ikemen-engine/Ikemen-GO), an open-source fighting game engine compatible with [M.U.G.E.N](https://en.wikipedia.org/wiki/Mugen_(game_engine)) resources, written in Go.
 
+This port tracks **pure upstream Ikemen-GO** (built from scratch — no fork patches). The upstream engine's official iOS story (Vulkan via MoltenVK on a CAMetalLayer, SDL2 UIKit driver) is replicated here on Linux with Theos, so the iOS app is byte-for-byte the same engine the upstream macOS/Xcode flow ships.
+
 Play classic M.U.G.E.N characters, stages, and screenpacks on your iOS device with native on-screen touch controls.
 
 ## Features
 
+- **Pure upstream engine** -- `ios/engine/` is a synced copy of upstream `ikemen-engine/Ikemen-GO`; no local engine modifications
 - **Full M.U.G.E.N compatibility** -- run characters, stages, screenpacks, and fonts from the M.U.G.E.N ecosystem
-- **Native on-screen controls** -- virtual D-pad (8-way) and 6 attack buttons (A/B/C/X/Y/Z) plus Start and Menu
-- **OpenGL ES 3.0 rendering** -- hardware-accelerated OpenGL ES 3.0 on iOS (the engine originally requested at least Desktop OpenGL 3.3 but it was adapted to OpenGL ES 3.0 which is the latest OpenGL version supported by iOS before Apple marked it as deprecated in favor of Metal)
+- **Vulkan rendering via MoltenVK** -- the engine's Vulkan renderer runs on Metal through MoltenVK (statically linked, resolved via `dlsym` exactly like the official Xcode app); includes the upstream engine's Metal-layer attach bridge (`SDLWindowFix.m`)
+- **Native on-screen controls** -- virtual D-pad (8-way) and 6 attack buttons (A/B/C/X/Y/Z) plus Start and Menu, translated into a **virtual SDL game controller** (same mechanism as the official ikemen-ios wrapper), so the engine's stock SDL joystick/gamecontroller input path consumes them
 - **SDL2-based** -- cross-platform windowing, input, and audio via SDL2
 - **FFmpeg integration** -- background video playback (WebM/Matroska with VP8/VP9/Opus/Vorbis)
 - **Module music support** -- MOD/XM/S3M/IT and other tracker formats via libxmp
-- **Game controller support** -- MFi and GameController framework controllers (coming soon, cannot test if added because do not have a game controller)
+- **Game controller support** -- MFi and GameController framework controllers
 - **File sharing** -- game data lives in `Documents/ikemen-go/IkemenGo`, accessible via iOS Files app
+- **Native crash log** -- a hard crash (SIGSEGV/SIGABRT/...) writes a native backtrace to `save/logs/native_crash.log` for diagnosis
 
 ## Prerequisites
 
 - **iOS device** (arm64, iOS 15+)
-- **[Theos](https://theos.dev/)** -- iOS build system (for non-Mac environments)
-- **Clang 21+** -- required for modern iOS SDK (like iOS 18+ and iOS 26+ SDKs) compatibility
-- **Go 1.20+** -- for compiling the engine
+- **[Theos](https://theos.dev/)** -- iOS build system (for non-Mac environments), with the **iPhoneOS 16.5 SDK** (or adjust `IOS_SDK`/`TARGET` in `ios/engine/build-ios.sh`)
+- **Clang** (the toolchain is tested on clang 22; earlier clangs work) plus **`ld64.lld`** (LLVM's Apple-Mach-O linker) for the engine's Go link step
+- **Go 1.27+** -- the upstream engine's `go.mod` requires `go 1.27.0`
+- Optionally **curl** (downloads MoltenVK's iOS static library automatically if `deps/ios-moltenvk` is missing) and **`rsync`** (used while assembling the app bundle)
 
 ### Installing Theos
 
@@ -43,26 +48,17 @@ git clone --recursive https://github.com/usedoperative-sudo/ikemen-go-ios.git
 cd ikemen-go-ios
 ```
 
-### 2. Compile the Go engine
+### 2. Compile the Go engine for iOS
 
-The engine must be compiled as a static library for iOS (arm64):
+One script does everything: sets up the iOS cross-compiler (`GOOS=ios GOARCH=arm64 CGO_ENABLED=1`, `GOEXPERIMENT=arenas`), the iOS SDK flags, SDL/FFmpeg/libxmp pkg-config and include paths, injects the version into the binary, and writes the c-archive the app links:
 
 ```bash
-cd ios/engine
-
-# Set up iOS cross-compilation
-export GOOS=ios
-export GOARCH=arm64
-export CGO_ENABLED=1
-export CC=$(which clang)
-export SDKPATH=$(ls -d $THEOS/sdks/iPhoneOS*.sdk | tail -1)
-export CFLAGS="-arch arm64 -isysroot $SDKPATH -miphoneos-version-min=15.0"
-
-# Build the static library
-go build -buildmode=c-archive -o ../../IKEMENGo/engine/libengine.a
-
-cd ../..
+./ios/engine/build-ios.sh
 ```
+
+This produces `IKEMENGo/engine/libengine.a` (a ~18 MB static library exporting `SDL_main` and `GetMoltenVKWindowID`). Recent versions of the script also fetch and stage MoltenVK's iOS static library into `deps/ios-moltenvk/` on first run.
+
+> The engine itself never links MoltenVK: the bundled `github.com/Eiton/vulkan` headers resolve MoltenVK's entry points with `dlsym(RTLD_DEFAULT)`. MoltenVK is linked only into the final app, force-loaded so its exported `vk*` symbols survive for that `dlsym`.
 
 ### 3. Build the iOS app
 
@@ -71,7 +67,7 @@ cd IKEMENGo
 make package
 ```
 
-This produces an `.ipa` file in `IKEMENGo/packages/`.
+This produces an `.ipa` file in `IKEMENGo/packages/`. The app bundle embeds the engine's `data/`, `external/`, and `font/` folders; on first launch they are seeded into `Documents/ikemen-go/IkemenGo`.
 
 ### 4. Install on device
 
@@ -91,12 +87,12 @@ This directory is accessible via the **iOS Files app** (under "On My iPhone" > "
 
 ```
 Documents/ikemen-go/IkemenGo/ # Where Documents resolves to On My iPhone > IKEMEN Go folder
-├── data/           # Screenpack and engine data
-├── font/           # Shared fonts
-├── external/       # External scripts and resources
-├── chars/          # Character folders
-├── stages/         # Stage files
-└── sound/          # Sound and music files
+├── data/           # Screenpack and engine data
+├── font/           # Shared fonts
+├── external/       # External scripts and resources
+├── chars/          # Character folders
+├── stages/         # Stage files
+└── sound/          # Sound and music files
 ```
 
 ### Adding characters
@@ -110,45 +106,62 @@ Documents/ikemen-go/IkemenGo/ # Where Documents resolves to On My iPhone > IKEME
 1. Place `.def` stage files in `Documents/ikemen-go/IkemenGo/stages/`
 2. Reference them in your screenpack's select definition
 
-> **Note for adding characters**: the iOS build uses the engine's default behavior of keeping every character on a team fully loaded in memory for the whole match. In Tag/Simul/Turns modes with **heavy external fighters**, the combined sprite + sound data can push the app over iOS's memory limit (the **Jetsam** watchdog kills the process with no warning). If the app quits suddenly during a match, it is almost always this. 
+> **Note for adding characters**: the iOS build uses the engine's default behavior of keeping every character on a team fully loaded in memory for the whole match. In Tag/Simul/Turns modes with **heavy external fighters**, the combined sprite + sound data can push the app over iOS's memory limit (the **Jetsam** watchdog kills the process with no warning). If the app quits suddenly during a match, it is almost always this.
 
 ## Known Limitations
 
 - **Memory / Jetsam kills with heavy content.** iOS enforces a hard memory limit per app. This port does not perform on-demand asset unloading for standby team fighters (a change that was prototyped but reverted because it could interfere with the engine's internal fight-logic invariants). Consequences:
-  - **Team modes (Tag / Simul / Turns) with large external fighters** can consume a lot of memory, because all team members remain resident.
-  - On low-memory iDevices, the app may be terminated by iOS with no error dialog.
-  - **Recommendation: avoid playing with very heavy fighters/packs** (particularly multiple big fighters on one team, or stages with long background videos), and keep the number of simultaneously-loaded team members low. A more capable device and fewer/lighter characters will help.
+  - **Team modes (Tag / Simul / Turns) with large external fighters** can consume a lot of memory, because all team members remain resident.
+  - On low-memory iDevices, the app may be terminated by iOS with no error dialog.
+  - **Recommendation: avoid playing with very heavy fighters/packs** (particularly multiple big fighters on one team, or stages with long background videos), and keep the number of simultaneously-loaded team members low. A more capable device and fewer/lighter characters will help.
 - **No graceful out-of-memory recovery** in the engine itself.
 
 ## Project Structure
 
 ```
 ikemen-go-ios/
-├── Ikemen-GO/              # Upstream Ikemen GO engine source (embedded copy)
-│   ├── src/                # Engine source code (Go)
-│   ├── build/              # Build scripts for desktop platforms
-│   └── ...
-├── IKEMENGo/               # iOS app
-│   ├── main.m              # App entry point, engine data seeding
-│   ├── OverlayControls.m   # On-screen touch controls (D-pad + buttons)
-│   ├── OverlayControls.h   # Touch controls header
-│   ├── Makefile            # Theos build configuration
-│   ├── control             # Debian-like package metadata
-│   ├── engine/             # Compiled engine output (libengine.a)
-│   └── Resources/          # App bundle resources
-├── ios/                    # iOS-specific engine build tree
-│   └── engine/             # iOS Go source files and vendor deps
-├── deps/                   # Pre-compiled iOS static libraries
-│   ├── ios-sdl/            # SDL2
-│   ├── ios-libxmp/         # libxmp (module music)
-│   └── ios-ffmpeg/         # FFmpeg (video/audio decoding)
-├── LICENSE                 # MIT License
-└── README.md               # This file
+├── Ikemen-GO/              # Upstream Ikemen GO engine source (embedded copy)
+│   ├── src/                # Engine source code (Go)
+│   ├── build/              # Build scripts for desktop platforms
+│   └── ...
+├── IKEMENGo/               # iOS app
+│   ├── main.m              # App entry point, native crash handler, engine-data seeding
+│   ├── AppDelegate.m/h     # Legacy (non-scene) app delegate; owns the host UIWindow
+│   ├── ViewController.m/h  # Host VC: overlay + launches engine via SDL_main(3, argv) with --assets
+│   ├── SDLWindowFix.m/h    # Metal-layer attach bridge (IkemenAttachMetalLayer) — same contract as the official wrapper
+│   ├── GoWindow.h          # Bridge decl for the engine-exported Go symbols
+│   ├── MetalStubs.m/h      # Stub symbols for iOS 17-only Metal classes MoltenVK references (never used on iOS 15/16)
+│   ├── OverlayControls.m/h # On-screen touch controls -> virtual SDL game controller
+│   ├── Makefile            # Theos build configuration
+│   ├── control             # Debian-like package metadata
+│   ├── engine/             # Compiled engine output (libengine.a)
+│   └── Resources/          # App bundle resources (Info.plist, icons)
+├── ios/                    # iOS-specific engine build tree
+│   └── engine/             # Upstream engine source + go.mod + build-ios.sh
+├── deps/                   # Pre-compiled iOS static libraries
+│   ├── ios-sdl/            # SDL2 (UIKit driver, Vulkan/Metal enabled)
+│   ├── ios-libxmp/         # libxmp (module music)
+│   ├── ios-ffmpeg/         # FFmpeg (video/audio decoding)
+│   ├── ios-moltenvk/       # MoltenVK iOS static lib (flat: libMoltenVK.a + LICENSE; app-only)
+│   └── scripts/            # Recipes that rebuilt the deps from source on Linux (see the FFmpeg --nm note below)
+├── LICENSE                 # MIT License
+└── README.md               # This file
 ```
+
+## Internals (how the pieces fit)
+
+- **Engine** -- `ios/engine/` is a directly synced copy of upstream (see `IOS_.TXT` / `build/build.sh` for the upstream reference flow). The engine's iOS build (`src/util_ios.go`) exports `SDL_main` and reads the game dir from `--assets <dir>` on the command line, chdir'ing into it at startup.
+- **App glue** -- `main.m` seeds `Documents/ikemen-go/IkemenGo` from the bundled engine folders, then `UIApplicationMain` runs legacy (non-scene) style with a custom `AppDelegate`/`ViewController`. The `ViewController` calls the engine's `SDL_main(3, argv)` with `--assets`.
+- **Display** -- SDL2 creates its Vulkan window (CAMetalLayer payload). Engines' renderer init calls `IkemenAttachMetalLayer()` (via cgo, from `src/sdl_ios.go`), which reparents the single CAMetalLayer into the app's host window, under the touch overlay. MoltenVK's `vkGetInstanceProcAddr` is discovered via `dlsym(RTLD_DEFAULT)` thanks to `-force_load` in the app's link step.
+- **Input** -- the overlay translates touches into a virtual SDL game controller (6 axes / 15 buttons / 1 hat). The engine's stock SDL controller path maps A→A, B→B, C→right trigger, X→X, Y→Y, Z→right shoulder, START→START, MENU→BACK; the D-pad drives both the D-pad buttons and the POV hat.
+- **Linker** -- the app links with `-fuse-ld=lld` (LLVM's unified driver, which auto-selects the Mach-O flavor; `ld64.lld` by name rejects Theos' `-platform_version`/`-arch` flags as written by this toolchain). `TARGET_OS_DEPLOYMENT_VERSION = 15.0` pins `minos 15.0`. The static MoltenVK needs `-Wl,-force_load` so its exported `vk*` symbols stay visible for the engine's `dlsym(RTLD_DEFAULT)` resolution (SDL's UIKit Vulkan loader).
+- **Linking hiccups fixed along the way** -- `libSystem` shims for `__isOSVersionAtLeast`/`__isPlatformVersionAtLeast` (the 16.5 SDK's `libSystem.tbd` omits them); `-framework CoreBluetooth` for SDL's BLE (`hid.m.o`); `-lz -lbz2 -liconv` for the FFmpeg codecs; a `MTLResidencySetDescriptor` stub class (iOS 17+ Metal API that MoltenVK 1.4.2 references; the 16.5 SDK lacks it, and MoltenVK only exercises residency sets under `@available(iOS 17)` checks). When FFmpeg's NEON assembly is rebuilt, it MUST pass `--nm=llvm-nm` to `configure`: FFmpeg detects the Mach-O underscore symbol prefix by reading a probe object with `nm`, and GNU `nm` cannot parse Mach-O, silently producing underscore-less `ff_*_neon` exports that no Mach-O linker can resolve (see `deps/scripts/build-ffmpeg-ios.sh`).
 
 ## Credits
 
 - **[Ikemen GO](https://github.com/ikemen-engine/Ikemen-GO)** -- the upstream engine this project is based on
+- **[ikemen-ios](https://github.com/ikemen-ios/I.K.E.M.E.N-Go)** -- the official iOS wrapper whose SDLWindowFix / virtual-controller patterns are mirrored in this app
+- **[MoltenVK](https://github.com/KhronosGroup/MoltenVK)** -- Vulkan on Metal
 - **[M.U.G.E.N](https://mugenengine.com/)** -- the original fighting game engine by Elecbyte
 - **[Theos](https://theos.dev/)** -- iOS build system for non-Mac environments
 - **[SDL2](https://www.libsdl.org/)** -- cross-platform multimedia library

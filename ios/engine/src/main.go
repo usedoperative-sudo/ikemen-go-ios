@@ -79,7 +79,7 @@ func realMain() {
 		// sdl.SetHint("SDL_VIDEO_EXTERNAL_CONTEXT", "0")
 		// sdl.SetHint("SDL_HIDAPI_IGNORE_DEVICES", "1")
 		// sdl.SetHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
-		sdl.SetHint(sdl.HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight")
+		// sdl.SetHint(sdl.HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight")
 		// sdl.SetHint("SDL_ANDROID_TRAP_BACK_BUTTON", "1")
 		// sdl.SetHint("SDL_JOYSTICK_HIDAPI", "0")
 		// sdl.SetHint("SDL_ANDROID_SEPARATE_MOUSE_AND_TOUCH", "1")
@@ -118,61 +118,41 @@ func realMain() {
 	} else if runtime.GOOS == "ios" {
 		Logcat("Inside realMain...")
 		runtime.LockOSThread()
-		sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_ES)
-		sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 3)
-		sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 0)
-		sdl.GLSetAttribute(sdl.GL_DOUBLEBUFFER, 1)
-		sdl.GLSetAttribute(sdl.GL_ALPHA_SIZE, 0)
-		sdl.GLSetAttribute(sdl.GL_DEPTH_SIZE, 24)
+		if sys.baseDir == "" {
+			panic("FATAL: iOS baseDir not set")
+		}
+		Logcat("sys.baseDir is: " + sys.baseDir)
+
+		if err := os.Chdir(sys.baseDir); err != nil {
+			Logcat(fmt.Sprintf("LOG: CHDIR FAILED: %v\n", err))
+			// Don't panic yet, let's see if we can continue
+		} else {
+			Logcat("LOG: CHDIR SUCCESSFUL")
+		}
+
+		// Set the orientation hints (all must be supported)
+		setOrientationHints()
 
 		// Init SDL NOW
-		if err := sdl.Init(sdl.INIT_AUDIO | sdl.INIT_VIDEO | sdl.INIT_EVENTS | sdl.INIT_TIMER); err != nil {
+		if err := sdl.Init(sdl.INIT_AUDIO | sdl.INIT_VIDEO | sdl.INIT_EVENTS | sdl.INIT_TIMER | sdl.INIT_JOYSTICK | sdl.INIT_GAMECONTROLLER); err != nil {
 			Logcat("LOG: SDL Init Failed: " + err.Error())
 			return
 		}
 		Logcat("LOG: SDL Init SUCCESS")
 
-		if sys.baseDir == "" {
-			sys.baseDir = getIOSDocumentsDir()
-		}
-
-		Logcat("sys.baseDir is: " + sys.baseDir)
-
-		// Check if the directory even exists to Go
-		if info, err := os.Stat(sys.baseDir); err != nil {
-			Logcat(fmt.Sprintf("LOG: STAT ERROR: %v\n", err))
-		} else {
-			Logcat(fmt.Sprintf("LOG: STAT OK: %s is a dir: %v\n", sys.baseDir, info.IsDir()))
-		}
-
-		// Explicitly initialize os.Args before processCommandLine
-		if os.Args == nil || len(os.Args) == 0 {
-			os.Args = []string{"ikemen-go"}
-		}
-
-		if err := os.Chdir(sys.baseDir); err != nil {
-			Logcat(fmt.Sprintf("LOG: CHDIR FAILED: %v\n", err))
-		} else {
-			Logcat("LOG: CHDIR SUCCESSFUL")
-		}
 	} else {
 		sys.baseDir = "./"
 	}
 
 	// Handle Permissions and Directory Creation
 	permission := os.FileMode(0755)
-	if runtime.GOOS != "android" {
+	if runtime.GOOS != "android" && runtime.GOOS != "ios" {
 		permission |= os.ModeSticky
 	}
 
 	// Create directories for ALL platforms
 	os.MkdirAll(filepath.Join(sys.baseDir, "save/replays"), permission)
 	os.MkdirAll(filepath.Join(sys.baseDir, "save/logs"), permission)
-
-	// Start capturing all stdout/stderr/Logcat output into save/logs/engine.log
-	if runtime.GOOS == "ios" {
-		initIOSFileLog()
-	}
 
 	processCommandLine()
 
@@ -196,7 +176,7 @@ func realMain() {
 		chk(f.Close())
 	}
 
-	if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+	if runtime.GOOS == "android" {
 		sdl.InitSubSystem(sdl.INIT_JOYSTICK)
 		sdl.InitSubSystem(sdl.INIT_GAMECONTROLLER)
 		Logcat("LOG: Subsystems initialized!")
@@ -218,12 +198,9 @@ func realMain() {
 		// For Android, let's see exactly what failed
 		panic(err)
 	}
-	// Force the OpenGL ES render mode for mobile.
-	// Android supports ES 3.2; iOS caps out at ES 3.0.
-	if runtime.GOOS == "android" {
-		cfg.Video.RenderMode = "OpenGL ES 3.2"
-	} else if runtime.GOOS == "ios" {
-		cfg.Video.RenderMode = "OpenGL ES 3.0"
+	// Force to Vulkan 1.3 for iOS
+	if runtime.GOOS == "ios" {
+		cfg.Video.RenderMode = "Vulkan 1.3"
 	}
 	sys.cfg = *cfg
 	// Logcat("LOG: Config Loaded. System Script: " + sys.cfg.Config.System)
@@ -319,7 +296,8 @@ func processCommandLine() {
 -width <num>            Sets game width
 -height <num>           Sets game height
 -setvolume <num>        Sets master volume to <num> (0-100)
--setport <num>          Overrides port number
+-tcpport <num>          Overrides host TCP port number
+-udpport <num>          Overrides rollback UDP port number
 	
 Quick VS Options:
 -p<n> <playername>      Loads player n, eg. -p3 kfm

@@ -152,7 +152,8 @@ float DirectionalLightShadowCalculation(int index, vec4 lightSpacePos,float Ndot
 		// https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping
 		float bias = max(0.0005 * (1.0 - NdotL), shadowBias) * 1024.0; // and scale back on shadow map texture size
 	#else
-		float bias = shadowBias*tan(acos(NdotL));
+		float slope = sqrt(1.0 - (NdotL * NdotL)) / max(NdotL, 0.0001); // avoid DIVIDE BY 0 caused by trig
+		float bias = max(shadowBias, 0.0005) * clamp(slope, 0.0, 5.0);
 	#endif
 	float shadow = closestDepth-currentDepth > -bias  ? 1.0 : 0.0;
 	#else
@@ -185,7 +186,8 @@ float SpotLightShadowCalculation(int index, vec3 pointToLight, vec4 lightSpacePo
 		// Scale back based on far plane, texture size
 		bias = bias * (farPlane * 1024.0);
 	#else
-		float bias = shadowBias*tan(acos(NdotL));
+		float slope = sqrt(1.0 - (NdotL * NdotL)) / max(NdotL, 0.0001); // avoid DIVIDE BY 0 caused by trig
+		float bias = shadowBias * clamp(slope, 0.0, 5.0);
 	#endif
 	float shadow = currentDepth-closestDepth < bias  ? 1.0 : 0.0;
 	#else
@@ -218,7 +220,8 @@ float PointLightShadowCalculation(int index, vec3 pointToLight,float NdotL,float
 		// Scale back based on far plane, texture size
 		bias = bias * (farPlane * 1024.0);
 	#else
-		float bias = shadowBias*tan(acos(NdotL));
+		float slope = sqrt(1.0 - (NdotL * NdotL)) / max(NdotL, 0.0001); // avoid DIVIDE BY 0 caused by trig
+		float bias = shadowBias * clamp(slope, 0.0, 5.0);
 	#endif
 
 	float shadow = currentDepth-closestDepth < bias  ? 1.0 : 0.0;
