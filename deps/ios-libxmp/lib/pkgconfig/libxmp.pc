@@ -1,11 +1,11 @@
 prefix=/workspaces/ikemen-go-ios/deps/ios-libxmp
 exec_prefix=${prefix}
-libdir=/workspaces/ikemen-go-ios/deps/ios-libxmp/lib
-includedir=/workspaces/ikemen-go-ios/deps/ios-libxmp/include
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
 
 Name: libxmp
 Description: Xmp module player library
-Version: 4.6.2
+Version: 4.7.3
 
 Requires:
 Libs: -L${libdir} -lxmp

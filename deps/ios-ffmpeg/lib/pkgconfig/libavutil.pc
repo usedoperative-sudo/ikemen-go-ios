@@ -5,10 +5,10 @@ includedir=/workspaces/ikemen-go-ios/deps/ios-ffmpeg/include
 
 Name: libavutil
 Description: FFmpeg utility library
-Version: 58.29.100
+Version: 60.8.103
 Requires: 
 Requires.private: 
 Conflicts:
-Libs: -L${libdir}  -lavutil -pthread -lm -framework CoreFoundation -framework CoreVideo -framework CoreMedia
+Libs: -L${libdir}  -lavutil -lm -framework CoreFoundation -framework CoreVideo -framework CoreMedia -pthread
 Libs.private: 
 Cflags: -I${includedir}

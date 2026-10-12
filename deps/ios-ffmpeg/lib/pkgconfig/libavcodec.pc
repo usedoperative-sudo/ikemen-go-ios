@@ -5,10 +5,10 @@ includedir=/workspaces/ikemen-go-ios/deps/ios-ffmpeg/include
 
 Name: libavcodec
 Description: FFmpeg codec library
-Version: 60.31.102
-Requires: libswresample >= 4.12.100, libavutil >= 58.29.100
+Version: 62.11.103
+Requires: libswresample >= 6.1.103, libavutil >= 60.8.103
 Requires.private: 
 Conflicts:
-Libs: -L${libdir}  -lavcodec -pthread -lm
+Libs: -L${libdir}  -lavcodec -pthread -liconv -lm -lz
 Libs.private: 
 Cflags: -I${includedir}

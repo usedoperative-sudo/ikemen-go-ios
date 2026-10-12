@@ -53,7 +53,7 @@ while test $# -gt 0; do
 #      ;;
 #    --static-libs)
     --libs|--static-libs)
-      sdl_static_libs=$(echo " -lSDL2   -lpthread  -lm -Wl,-framework,CoreVideo -Wl,-framework,CoreAudio -Wl,-framework,AudioToolbox -Wl,-framework,AVFoundation -Wl,-framework,CoreGraphics -Wl,-framework,CoreMotion -Wl,-framework,Foundation -Wl,-weak_framework,GameController -Wl,-framework,Metal -Wl,-framework,OpenGLES -Wl,-framework,QuartzCore -Wl,-framework,UIKit -Wl,-weak_framework,CoreHaptics" | sed -E "s#-lSDL2[ $]#$libdir/libSDL2.a #g")
+      sdl_static_libs=$(echo " -lSDL2   -lpthread  -lm -Wl,-framework,CoreVideo -Wl,-framework,CoreAudio -Wl,-framework,AudioToolbox -Wl,-framework,AVFoundation -Wl,-framework,CoreBluetooth -Wl,-framework,CoreGraphics -Wl,-framework,CoreMotion -Wl,-framework,Foundation -Wl,-weak_framework,GameController -Wl,-framework,Metal -Wl,-framework,OpenGLES -Wl,-framework,QuartzCore -Wl,-framework,UIKit -Wl,-weak_framework,CoreHaptics" | sed -E "s#-lSDL2[ $]#$libdir/libSDL2.a #g")
       echo -L${exec_prefix}/lib $sdl_static_libs
       ;;
     *)
