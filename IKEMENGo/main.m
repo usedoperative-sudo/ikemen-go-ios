@@ -136,9 +136,28 @@ static void IKNativeCrashInit(void) {
 	sigaction(SIGFPE, &sa, NULL);
 }
 
+// MoltenVK 1.4.2's device init (MVKDevice::initQueues, built under the Xcode 16
+// SDK) creates an MTLResidencySetDescriptor when Metal argument buffers are in use
+// and the device supports residency sets (iOS 17+). The iPhoneOS16.5 SDK cannot
+// link that class, so it is provided by MetalStubs.m; passing the stub to Metal's
+// newResidencySetWithDescriptor:error: raises an NSException that aborts the app.
+// MoltenVK gates the residency-set path on _isUsingMetalArgumentBuffers (and it
+// reads this config member from the MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS env var
+// lazily, at first config use during vkCreateInstance). Forcing it off makes the
+// residency path unreachable, so the stub is never exercised at runtime. The
+// engine enables no argument-buffer-dependent Vulkan features (no descriptor
+// indexing, no sparse), so this is functionally transparent. Upstream ikemen
+// would crash here on iOS 17+; this is the documented deviation.
+static void IKApplyMoltenVKConfigOverrides(void) {
+	setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "0", 1);
+	NSLog(@"IKEMENGo: set MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0 "
+	      @"(avoid MoltenVK MTLResidencySetDescriptor stub deref)");
+}
+
 int main(int argc, char *argv[]) {
 	@autoreleasepool {
 		IKNativeCrashInit();
+		IKApplyMoltenVKConfigOverrides();
 		seedEngineData();
 		return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class]));
 	}

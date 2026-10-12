@@ -8,9 +8,19 @@
 //  so the Mach-O linker cannot resolve them.
 //
 //  We provide a real (if minimal) class definition here purely so the symbols
-//  exist at link time. MoltenVK only exercises the residency-set code path
-//  under `@available(iOS 17.0, ...)` checks, so on iOS 15/16 devices — the
-//  target of this build — this stub is never instantiated.
+//  exist at link time. MoltenVK would prefer this as a weak import, but the
+//  linked ld64.lld supports neither -U nor -weak_import for a symbol that is
+//  absent from the SDK, and -undefined dynamic_lookup risks a binary that dyld
+//  may refuse to load. The remaining options were a stub class (this file) or
+//  no binary at all.
+//
+//  This stub must never be dereferenced at runtime: MoltenVK's residency-set
+//  path lives in MVKDevice::initQueues and is gated on BOTH Metal residency-set
+//  support (iOS 17+) AND _isUsingMetalArgumentBuffers. main.m forces
+//  MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0 (see IKApplyMoltenVKConfigOverrides),
+//  which makes _isUsingMetalArgumentBuffers false on every device, so the stub
+//  is never instantiated. Do not remove that env override without replacing this
+//  class with a proper weak-import mechanism.
 //
 
 #import <Foundation/Foundation.h>
