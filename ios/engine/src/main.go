@@ -374,14 +374,23 @@ func handlePanic(r interface{}) {
 	version := fmt.Sprintf("Version: %s", Version)
 	buildTime := fmt.Sprintf("Build Time: %s", BuildTime)
 	platform := fmt.Sprintf("Platform: %s (%s)", runtime.GOOS, runtime.GOARCH)
-	render := gfx.GetName()
+	// [iOS] A crash can occur before the renderer is initialized (e.g. missing
+	// game data at startup). Calling methods on the nil gfx interface would
+	// SIGSEGV inside handlePanic and mask the real error, so guard it.
+	render := ""
+	if gfx != nil {
+		render = gfx.GetName()
+	}
 
 	// Prepare stats
 	memory := fmt.Sprintf("RAM in Use: %v MB / OS Reserved: %v MB", mem.Alloc/1024/1024, mem.Sys/1024/1024)
 	threads := fmt.Sprintf("Active Goroutines: %d", runtime.NumGoroutine())
 
 	// Renderer debug info (GPU memory stats, etc.)
-	rendererDebug := gfx.DebugInfo()
+	rendererDebug := ""
+	if gfx != nil {
+		rendererDebug = gfx.DebugInfo()
+	}
 
 	// Identify the crash type
 	crashType := "Fatal runtime error" // Default for unsafe crashes
@@ -446,7 +455,10 @@ func handlePanic(r interface{}) {
 
 	ShowErrorDialog(dialogMsg)
 
-	// Cleanup and exit
-	sys.shutdown()
+	// Cleanup and exit — only if the engine actually started. A crash before
+	// renderer init leaves gfx nil; sys.shutdown() would SIGSEGV on gfx.Close().
+	if gfx != nil {
+		sys.shutdown()
+	}
 	os.Exit(1)
 }

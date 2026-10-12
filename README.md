@@ -2,13 +2,13 @@
 
 An iOS port of [Ikemen GO](https://github.com/ikemen-engine/Ikemen-GO), an open-source fighting game engine compatible with [M.U.G.E.N](https://en.wikipedia.org/wiki/Mugen_(game_engine)) resources, written in Go.
 
-This port tracks **pure upstream Ikemen-GO** (built from scratch — no fork patches). The upstream engine's official iOS story (Vulkan via MoltenVK on a CAMetalLayer, SDL2 UIKit driver) is replicated here on Linux with Theos, so the iOS app is byte-for-byte the same engine the upstream macOS/Xcode flow ships.
+This port tracks **pure upstream Ikemen-GO** (built from scratch — no fork-style patches). The upstream engine's official iOS story (Vulkan via MoltenVK on a CAMetalLayer, SDL2 UIKit driver) is replicated here on Linux with Theos, so the iOS app is the same engine the upstream macOS/Xcode flow ships — with exactly one deliberate, documented deviation: a small crash-path guard in `src/main.go` (`handlePanic`) so that pre-renderer-init crashes surface as readable errors instead of a nested segfault (see *Internals* below).
 
 Play classic M.U.G.E.N characters, stages, and screenpacks on your iOS device with native on-screen touch controls.
 
 ## Features
 
-- **Pure upstream engine** -- `ios/engine/` is a synced copy of upstream `ikemen-engine/Ikemen-GO`; no local engine modifications
+- **Pure upstream engine** -- `ios/engine/` is a synced copy of upstream `ikemen-engine/Ikemen-GO`; the only local engine modification is the `handlePanic` crash-path guard in `src/main.go` (see *Internals* below)
 - **Full M.U.G.E.N compatibility** -- run characters, stages, screenpacks, and fonts from the M.U.G.E.N ecosystem
 - **Vulkan rendering via MoltenVK** -- the engine's Vulkan renderer runs on Metal through MoltenVK (statically linked, resolved via `dlsym` exactly like the official Xcode app); includes the upstream engine's Metal-layer attach bridge (`SDLWindowFix.m`)
 - **Native on-screen controls** -- virtual D-pad (8-way) and 6 attack buttons (A/B/C/X/Y/Z) plus Start and Menu, translated into a **virtual SDL game controller** (same mechanism as the official ikemen-ios wrapper), so the engine's stock SDL joystick/gamecontroller input path consumes them
@@ -67,7 +67,7 @@ cd IKEMENGo
 make package
 ```
 
-This produces an `.ipa` file in `IKEMENGo/packages/`. The app bundle embeds the engine's `data/`, `external/`, and `font/` folders; on first launch they are seeded into `Documents/ikemen-go/IkemenGo`.
+This produces an `.ipa` file in `IKEMENGo/packages/`. The app bundle embeds the engine's `data/`, `external/`, and `font/` folders as real subfolders (staged via a `before-IKEMENGo-stage` hook in the Makefile, since `RESOURCE_DIRS` alone would *flatten* their contents into the bundle root); on first launch they are seeded into `Documents/ikemen-go/IkemenGo`.
 
 ### 4. Install on device
 
@@ -151,6 +151,7 @@ ikemen-go-ios/
 ## Internals (how the pieces fit)
 
 - **Engine** -- `ios/engine/` is a directly synced copy of upstream (see `IOS_.TXT` / `build/build.sh` for the upstream reference flow). The engine's iOS build (`src/util_ios.go`) exports `SDL_main` and reads the game dir from `--assets <dir>` on the command line, chdir'ing into it at startup.
+- **iOS-only deviation from upstream (crash-path guard)** -- upstream's `handlePanic` (in `src/main.go`) calls `gfx.GetName()`/`gfx.DebugInfo()` unconditionally and then `sys.shutdown()`. If the engine crashes *before* the renderer exists (e.g. missing seeded game data at startup), the nil `gfx` interface causes a real SIGSEGV *inside* `handlePanic`, masking the actual error. The port guards those three sites with `if gfx != nil`, so a pre-init failure writes the engine's readable log (`save/logs/Ikemen_*.log`) instead. Nothing else in the engine differs from upstream.
 - **App glue** -- `main.m` seeds `Documents/ikemen-go/IkemenGo` from the bundled engine folders, then `UIApplicationMain` runs legacy (non-scene) style with a custom `AppDelegate`/`ViewController`. The `ViewController` calls the engine's `SDL_main(3, argv)` with `--assets`.
 - **Display** -- SDL2 creates its Vulkan window (CAMetalLayer payload). Engines' renderer init calls `IkemenAttachMetalLayer()` (via cgo, from `src/sdl_ios.go`), which reparents the single CAMetalLayer into the app's host window, under the touch overlay. MoltenVK's `vkGetInstanceProcAddr` is discovered via `dlsym(RTLD_DEFAULT)` thanks to `-force_load` in the app's link step.
 - **Input** -- the overlay translates touches into a virtual SDL game controller (6 axes / 15 buttons / 1 hat). The engine's stock SDL controller path maps A→A, B→B, C→right trigger, X→X, Y→Y, Z→right shoulder, START→START, MENU→BACK; the D-pad drives both the D-pad buttons and the POV hat.

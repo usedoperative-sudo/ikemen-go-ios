@@ -43,7 +43,21 @@ IKEMENGo_LDFLAGS = \
 	-Wl,-no_compact_unwind \
 	-Wl,--error-limit=0
 
-# Bundle the engine's built-in data/external/font into the app for first-run seeding.
-IKEMENGo_RESOURCE_DIRS = Resources ../ios/engine/data ../ios/engine/external ../ios/engine/font
+# Bundle the engine's built-in data/external/font into the app for first-run
+# seeding. XXX_RESOURCE_DIRS *flattens* a directory's contents into the bundle
+# root, which does not match the engine's expected data/system.zss layout, so
+# only Resources (Info.plist, icons) is flattened and the engine dirs are staged
+# as real subfolders below.
+IKEMENGo_RESOURCE_DIRS = Resources
+
+# The first-launch seeder (main.m -> seedEngineData) expects "data", "external",
+# and "font" subfolders inside the bundle; carry them over as true subfolders.
+before-IKEMENGo-stage::
+	$(info === Packaging engine data/external/font into the bundle ...)
+	mkdir -p "$(_THEOS_SHARED_BUNDLE_STAGE_PATH)"
+	for d in data external font; do \
+		rm -rf "$(_THEOS_SHARED_BUNDLE_STAGE_PATH)/$$d"; \
+		cp -R "/workspaces/ikemen-go-ios/ios/engine/$$d" "$(_THEOS_SHARED_BUNDLE_STAGE_PATH)/"; \
+	done
 
 include $(THEOS_MAKE_PATH)/application.mk
