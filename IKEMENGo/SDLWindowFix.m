@@ -44,13 +44,23 @@ UIInterfaceOrientationMask IkemenLockedOrientationMask(void) {
         return;
     }
     CGFloat scale = self.window.screen.nativeScale ?: [UIScreen mainScreen].nativeScale;
-    CGSize newDrawableSize = CGSizeMake(boundsSize.width * scale, boundsSize.height * scale);
-    NSLog(@"[MetalContainer] layoutSubviews: bounds=%@ scale=%.1f newDrawableSize=%@ oldDrawableSize=%@",
-          NSStringFromCGSize(boundsSize), scale,
+
+    // Portrait: render the fight only in the top band, leaving the bottom band
+    // for the touch controls (IKEMEN_PORTRAIT_GAME_BAND_RATIO, shared with the
+    // overlay so the bands line up). Landscape keeps the full-screen game.
+    // The CAMetalLayer's drawable size defines the MoltenVK swapchain extent,
+    // so shrinking the layer is what actually confines the rendering.
+    CGRect layerFrame = self.bounds;
+    if (boundsSize.height > boundsSize.width) {
+        layerFrame.size.height = boundsSize.height * IKEMEN_PORTRAIT_GAME_BAND_RATIO;
+    }
+    CGSize newDrawableSize = CGSizeMake(layerFrame.size.width * scale, layerFrame.size.height * scale);
+    NSLog(@"[MetalContainer] layoutSubviews: bounds=%@ layer=%@ scale=%.1f newDrawableSize=%@ oldDrawableSize=%@",
+          NSStringFromCGSize(boundsSize), NSStringFromCGRect(layerFrame), scale,
           NSStringFromCGSize(newDrawableSize), NSStringFromCGSize(self.metalLayer.drawableSize));
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    self.metalLayer.frame = self.bounds;
+    self.metalLayer.frame = layerFrame;
     self.metalLayer.contentsScale = scale;
     self.metalLayer.drawableSize = newDrawableSize;
     [CATransaction commit];

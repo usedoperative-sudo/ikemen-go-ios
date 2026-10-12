@@ -58,7 +58,19 @@ export CGO_LDFLAGS="-fuse-ld=${LD} -Wl,-platform_version,ios,15.0,15.0 \
   -L${DEPS}/ios-libxmp/lib -L${DEPS}/ios-ffmpeg/lib -L${DEPS}/ios-sdl/lib"
 export PKG_CONFIG_PATH="${DEPS}/ios-sdl/lib/pkgconfig:${DEPS}/ios-ffmpeg/lib/pkgconfig:${DEPS}/ios-libxmp/lib/pkgconfig"
 
-VERSION="$(git -C "$REPO" describe --tags --always 2>/dev/null || echo dev)"
+# In-game version string. The engine draws it verbatim in the screenpack footer
+# (src/motif.go: title_info.footer.version.text) and in crash reports.
+#
+# It is composed from explicit constants rather than `git describe`: the port
+# repo carries legacy tags (e.g. a literal tag `1.0_1.0.0rc4`), so describing it
+# produced strings like "1.0_1.0.0rc4-4-gbb93c64" — port version, engine version
+# and a stray commit hash all glued together. Override on the command line when
+# bumping either number:
+#   IKEMEN_ENGINE_VERSION=<upstream Ikemen-GO release>   (default 1.0.0)
+#   IKEMEN_PORT_VERSION=<this iOS port's release>        (default 1.0)
+IKEMEN_ENGINE_VERSION="${IKEMEN_ENGINE_VERSION:-1.0.0}"
+IKEMEN_PORT_VERSION="${IKEMEN_PORT_VERSION:-1.0}"
+VERSION="${IKEMEN_PORT_VERSION}_${IKEMEN_ENGINE_VERSION}"
 BUILDTIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 mkdir -p "$OUT_DIR"

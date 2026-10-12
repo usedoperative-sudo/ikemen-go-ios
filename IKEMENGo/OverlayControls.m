@@ -1,4 +1,6 @@
 #import "OverlayControls.h"
+#import <QuartzCore/QuartzCore.h>   // CAMetalLayer, referenced by SDLWindowFix.h
+#import "SDLWindowFix.h"            // IKEMEN_PORTRAIT_GAME_BAND_RATIO (portrait layout)
 #import <SDL2/SDL.h>
 
 // On-screen control IDs (UI tags).
@@ -114,6 +116,67 @@ static void IKENHandleDirection(int idx, BOOL on) {
     SDL_JoystickUpdate();
 }
 
+#pragma mark - Haptics
+
+// Haptic feedback for the on-screen controller. The virtual SDL gamepad is the
+// only input device on iOS, so we mirror what a physical controller would do:
+//   - attack / face buttons (A B C X Y Z): a medium tap
+//   - START / MENU: a softer tap
+//   - D-pad entering a new direction: a selection tick
+// Generators are expensive to spin up, so they are created once and re-primed
+// after each use for the lowest latency. On hardware without a haptic engine
+// (or the Simulator) these calls are inert no-ops, which is fine.
+@interface IkemenHaptics : NSObject
+@property (nonatomic, strong) UIImpactFeedbackGenerator *light;
+@property (nonatomic, strong) UIImpactFeedbackGenerator *medium;
+@property (nonatomic, strong) UISelectionFeedbackGenerator *selection;
++ (instancetype)shared;
+- (void)tapLight;
+- (void)tapMedium;
+- (void)tick;
+@end
+
+@implementation IkemenHaptics
+
++ (instancetype)shared {
+    static IkemenHaptics *sShared = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ sShared = [[IkemenHaptics alloc] init]; });
+    return sShared;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        // UIImpactFeedbackGenerator/UISelectionFeedbackGenerator are iOS 10+;
+        // the app floor is iOS 15, so no availability guards are needed.
+        _light = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+        _medium = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+        _selection = [[UISelectionFeedbackGenerator alloc] init];
+        [_light prepare];
+        [_medium prepare];
+        [_selection prepare];
+    }
+    return self;
+}
+
+- (void)tapLight {
+    [_light impactOccurred];
+    [_light prepare];
+}
+
+- (void)tapMedium {
+    [_medium impactOccurred];
+    [_medium prepare];
+}
+
+- (void)tick {
+    [_selection selectionChanged];
+    [_selection prepare];
+}
+
+@end
+
 #pragma mark - D-Pad
 
 // 8-way digital D-pad. Tapping/gliding on it sets the four cardinal M.U.G.E.N.
@@ -168,6 +231,11 @@ static void IKENHandleDirection(int idx, BOOL on) {
     IKENSetCardinalState(idx, on);
     if (_last[idx] != on) {
         _last[idx] = on;
+        // Tick only when a direction is newly pressed (not on release), so
+        // gliding across sectors feels like a d-pad detent rather than buzzing.
+        if (on) {
+            [[IkemenHaptics shared] tick];
+        }
         IKENHandleDirection(idx, on);
     }
 }
@@ -395,6 +463,12 @@ static void IKENHandleDirection(int idx, BOOL on) {
     int keyId = (int)sender.tag;
     if ([_btnHeld[@(keyId)] boolValue]) return;
     _btnHeld[@(keyId)] = @YES;
+    // Attack/face buttons get a firm tap; START/MENU a softer one.
+    if (keyId == IKEMEN_ID_START || keyId == IKEMEN_ID_MENU) {
+        [[IkemenHaptics shared] tapLight];
+    } else {
+        [[IkemenHaptics shared] tapMedium];
+    }
     IKENHandleButton(keyId, YES);
 }
 
@@ -408,6 +482,19 @@ static void IKENHandleDirection(int idx, BOOL on) {
     [super layoutSubviews];
     CGFloat W = CGRectGetWidth(self.bounds);
     CGFloat H = CGRectGetHeight(self.bounds);
+    if (W <= 0 || H <= 0) {
+        return;
+    }
+    if (H > W) {
+        [self layoutPortraitWithWidth:W height:H];
+    } else {
+        [self layoutLandscapeWithWidth:W height:H];
+    }
+}
+
+// Horizontal gameplay: the fight fills the screen and the controls float over
+// it (left thumb = D-pad, right thumb = attack cluster).
+- (void)layoutLandscapeWithWidth:(CGFloat)W height:(CGFloat)H {
     CGFloat r = W * 0.034f;
     CGFloat gapX = W * 0.088f;
     // Fight cluster shifted left so Z/C stay fully on screen.
@@ -431,6 +518,35 @@ static void IKENHandleDirection(int idx, BOOL on) {
     // Menu and Start in the top-left corner (out of the way of the fight).
     [self layoutButton:IKEMEN_ID_MENU  x:W*0.02f y:H*0.03f d:r*2];
     [self layoutButton:IKEMEN_ID_START x:W*0.11f y:H*0.03f d:r*2];
+}
+
+// Vertical gameplay: the engine renders the fight in the top band
+// (IKEMEN_PORTRAIT_GAME_BAND_RATIO) and every control lives in the band below
+// it, so nothing overlaps the action. The D-pad frame deliberately starts at
+// bandTop so its touch zone never reaches up into the game area.
+- (void)layoutPortraitWithWidth:(CGFloat)W height:(CGFloat)H {
+    CGFloat bandTop = H * IKEMEN_PORTRAIT_GAME_BAND_RATIO;
+    CGFloat bandH   = H - bandTop;
+    CGFloat d       = W * 0.068f;   // button diameter
+    CGFloat gapX    = W * 0.088f;
+
+    CGRect padF = CGRectMake(0, bandTop + bandH * 0.30f, W * 0.46f, bandH * 0.70f);
+    _dPad.frame = padF;
+
+    // Two rows of three attack buttons on the right of the control band.
+    CGFloat col0   = W * 0.52f;
+    CGFloat rowTop = bandTop + bandH * 0.16f;
+    CGFloat rowBot = bandTop + bandH * 0.68f;
+    [self layoutButton:IKEMEN_ID_A x:col0        y:rowTop d:d];
+    [self layoutButton:IKEMEN_ID_B x:col0+gapX   y:rowTop d:d];
+    [self layoutButton:IKEMEN_ID_C x:col0+2*gapX y:rowTop d:d];
+    [self layoutButton:IKEMEN_ID_X x:col0        y:rowBot d:d];
+    [self layoutButton:IKEMEN_ID_Y x:col0+gapX   y:rowBot d:d];
+    [self layoutButton:IKEMEN_ID_Z x:col0+2*gapX y:rowBot d:d];
+
+    // Start/Menu at the top-left of the control band, clear of the game area.
+    [self layoutButton:IKEMEN_ID_MENU  x:W*0.03f y:bandTop + bandH*0.06f d:d];
+    [self layoutButton:IKEMEN_ID_START x:W*0.15f y:bandTop + bandH*0.06f d:d];
 }
 
 - (void)layoutButton:(int)keyId x:(CGFloat)x y:(CGFloat)y d:(CGFloat)d {
