@@ -97,7 +97,7 @@ Documents/ikemen-go/IkemenGo/
 
 ### Adding characters and stages
 
-1. Drop your character folders into `Chars/` and `.def` stage files into `Stages/`.
+1. Drop your character folders into `chars/` and `.def` stage files into `Stages/`.
 2. Edit the select screen file in `data/` to include them.
 3. Restart the app.
 
