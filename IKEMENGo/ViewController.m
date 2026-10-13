@@ -42,6 +42,13 @@ extern int SDL_main(int argc, char *argv[]);
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    // Prime haptic generators before first interaction.
+    for (UIView *v in self.view.subviews) {
+        if ([v isKindOfClass:NSClassFromString(@"IkemenOverlayView")]) {
+            [(id)v performSelector:@selector(warmUpHaptics)];
+            break;
+        }
+    }
     [self runIkemenGo];
 }
 

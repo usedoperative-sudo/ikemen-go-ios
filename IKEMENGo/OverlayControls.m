@@ -122,18 +122,15 @@ static void IKENHandleDirection(int idx, BOOL on) {
 // only input device on iOS, so we mirror what a physical controller would do:
 //   - attack / face buttons (A B C X Y Z): a medium tap
 //   - START / MENU: a softer tap
-//   - D-pad entering a new direction: a selection tick
-// Generators are expensive to spin up, so they are created once and re-primed
-// after each use for the lowest latency. On hardware without a haptic engine
-// (or the Simulator) these calls are inert no-ops, which is fine.
+//   - D-pad entering a new direction: a light tap
+// Fresh generator per tap (Apple: "Creating a feedback generator is lightweight,
+// so you can create a new one for each interaction") with prepare() on touch
+// down and impactOccurred() on the next run-loop tick for minimum latency.
+// This works reliably in LiveContainer where persistent generators can stall.
 @interface IkemenHaptics : NSObject
-@property (nonatomic, strong) UIImpactFeedbackGenerator *light;
-@property (nonatomic, strong) UIImpactFeedbackGenerator *medium;
-@property (nonatomic, strong) UISelectionFeedbackGenerator *selection;
 + (instancetype)shared;
 - (void)tapLight;
 - (void)tapMedium;
-- (void)tick;
 @end
 
 @implementation IkemenHaptics
@@ -146,33 +143,25 @@ static void IKENHandleDirection(int idx, BOOL on) {
 }
 
 - (instancetype)init {
-    self = [super init];
-    if (self) {
-        // UIImpactFeedbackGenerator/UISelectionFeedbackGenerator are iOS 10+;
-        // the app floor is iOS 15, so no availability guards are needed.
-        _light = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
-        _medium = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-        _selection = [[UISelectionFeedbackGenerator alloc] init];
-        [_light prepare];
-        [_medium prepare];
-        [_selection prepare];
-    }
-    return self;
+    return [super init];
 }
 
+// Fire a light tap (D-pad, Start, Menu).
 - (void)tapLight {
-    [_light impactOccurred];
-    [_light prepare];
+    UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+    [gen prepare];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [gen impactOccurred];
+    });
 }
 
+// Fire a medium tap (attack buttons A/B/C/X/Y/Z).
 - (void)tapMedium {
-    [_medium impactOccurred];
-    [_medium prepare];
-}
-
-- (void)tick {
-    [_selection selectionChanged];
-    [_selection prepare];
+    UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [gen prepare];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [gen impactOccurred];
+    });
 }
 
 @end
@@ -231,10 +220,10 @@ static void IKENHandleDirection(int idx, BOOL on) {
     IKENSetCardinalState(idx, on);
     if (_last[idx] != on) {
         _last[idx] = on;
-        // Tick only when a direction is newly pressed (not on release), so
+        // Tap only when a direction is newly pressed (not on release), so
         // gliding across sectors feels like a d-pad detent rather than buzzing.
         if (on) {
-            [[IkemenHaptics shared] tick];
+            [[IkemenHaptics shared] tapLight];
         }
         IKENHandleDirection(idx, on);
     }
@@ -478,6 +467,9 @@ static void IKENHandleDirection(int idx, BOOL on) {
     IKENHandleButton(keyId, NO);
 }
 
+// No persistent generators to warm up; kept for API compatibility.
+- (void)warmUpHaptics { }
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat W = CGRectGetWidth(self.bounds);
@@ -522,31 +514,47 @@ static void IKENHandleDirection(int idx, BOOL on) {
 
 // Vertical gameplay: the engine renders the fight in the top band
 // (IKEMEN_PORTRAIT_GAME_BAND_RATIO) and every control lives in the band below
-// it, so nothing overlaps the action. The D-pad frame deliberately starts at
-// bandTop so its touch zone never reaches up into the game area.
+// it, so nothing overlaps the action. Controls are sized off the screen's short
+// side (in portrait W is the *narrow* side, so sizing off W like the landscape
+// layout does makes everything tiny) and each group is centred in its half of
+// the band. The D-pad zone starts at bandTop so it never reaches into the game.
 - (void)layoutPortraitWithWidth:(CGFloat)W height:(CGFloat)H {
     CGFloat bandTop = H * IKEMEN_PORTRAIT_GAME_BAND_RATIO;
     CGFloat bandH   = H - bandTop;
-    CGFloat d       = W * 0.068f;   // button diameter
-    CGFloat gapX    = W * 0.088f;
+    CGFloat s       = MIN(W, H);   // screen short side: a stable scale in portrait
 
-    CGRect padF = CGRectMake(0, bandTop + bandH * 0.30f, W * 0.46f, bandH * 0.70f);
-    _dPad.frame = padF;
+    // Touch-friendly sizes, clamped so phones and tablets both get sane targets.
+    CGFloat btn    = MIN(MAX(s * 0.14f, 46.0f), 92.0f);
+    CGFloat colGap = btn * 1.16f;   // left-edge spacing (small gap between buttons)
+    CGFloat rowGap = btn * 0.30f;   // vertical gap between the two rows
 
-    // Two rows of three attack buttons on the right of the control band.
-    CGFloat col0   = W * 0.52f;
-    CGFloat rowTop = bandTop + bandH * 0.16f;
-    CGFloat rowBot = bandTop + bandH * 0.68f;
-    [self layoutButton:IKEMEN_ID_A x:col0        y:rowTop d:d];
-    [self layoutButton:IKEMEN_ID_B x:col0+gapX   y:rowTop d:d];
-    [self layoutButton:IKEMEN_ID_C x:col0+2*gapX y:rowTop d:d];
-    [self layoutButton:IKEMEN_ID_X x:col0        y:rowBot d:d];
-    [self layoutButton:IKEMEN_ID_Y x:col0+gapX   y:rowBot d:d];
-    [self layoutButton:IKEMEN_ID_Z x:col0+2*gapX y:rowBot d:d];
+    // D-pad: a square centred in the left half of the band, sized to fill it so
+    // the touch zone is generous.
+    CGFloat leftW = W * 0.5f;
+    CGFloat side  = MIN(MIN(leftW, bandH) * 0.9f, 300.0f);
+    _dPad.frame = CGRectMake((leftW - side) * 0.5f,
+                             bandTop + (bandH - side) * 0.5f,
+                             side, side);
 
-    // Start/Menu at the top-left of the control band, clear of the game area.
-    [self layoutButton:IKEMEN_ID_MENU  x:W*0.03f y:bandTop + bandH*0.06f d:d];
-    [self layoutButton:IKEMEN_ID_START x:W*0.15f y:bandTop + bandH*0.06f d:d];
+    // Attack cluster: two rows of three, centred in the right half of the band.
+    CGFloat clusterW = 2.0f * colGap + btn;
+    CGFloat col0     = (W + leftW) * 0.5f - clusterW * 0.5f;
+    CGFloat rowsTop  = bandTop + (bandH - (2.0f * btn + rowGap)) * 0.5f;
+    CGFloat rowTop   = rowsTop;
+    CGFloat rowBot   = rowsTop + btn + rowGap;
+    [self layoutButton:IKEMEN_ID_A x:col0          y:rowTop d:btn];
+    [self layoutButton:IKEMEN_ID_B x:col0+colGap   y:rowTop d:btn];
+    [self layoutButton:IKEMEN_ID_C x:col0+2*colGap y:rowTop d:btn];
+    [self layoutButton:IKEMEN_ID_X x:col0          y:rowBot d:btn];
+    [self layoutButton:IKEMEN_ID_Y x:col0+colGap   y:rowBot d:btn];
+    [self layoutButton:IKEMEN_ID_Z x:col0+2*colGap y:rowBot d:btn];
+
+    // Start/Menu: centred across the top of the control band, clear of the D-pad.
+    CGFloat menuGap = btn * 0.30f;
+    CGFloat menuX0  = (W - (2.0f * btn + menuGap)) * 0.5f;
+    CGFloat menuY   = bandTop + bandH * 0.06f;
+    [self layoutButton:IKEMEN_ID_MENU  x:menuX0                 y:menuY d:btn];
+    [self layoutButton:IKEMEN_ID_START x:menuX0 + btn + menuGap y:menuY d:btn];
 }
 
 - (void)layoutButton:(int)keyId x:(CGFloat)x y:(CGFloat)y d:(CGFloat)d {

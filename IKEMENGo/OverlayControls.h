@@ -9,4 +9,5 @@
 // engine-side customization.
 @interface IkemenOverlayView : UIView
 - (instancetype)initWithFrame:(CGRect)frame;
+- (void)warmUpHaptics;
 @end

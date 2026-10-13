@@ -1,4 +1,4 @@
-TARGET := iphone:clang:16.5
+TARGET := iphone:clang:26.5
 TARGET_OS_DEPLOYMENT_VERSION = 15.0
 ARCHS = arm64
 PACKAGE_FORMAT = ipa
