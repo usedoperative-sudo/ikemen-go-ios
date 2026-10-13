@@ -29,20 +29,23 @@ Play classic M.U.G.E.N characters, stages, and screenpacks on your iOS device wi
 ### Installing Theos
 
 ```bash
-# Clone Theos
-git clone --recursive [https://github.com/theos/theos.git](https://github.com/theos/theos.git) ~/theos
-
 # Set environment variable (add to your shell profile)
 export THEOS=/opt/theos
 
+# Clone Theos
+sudo git clone --recursive https://github.com/theos/theos.git $THEOS
+
+# Own the Theos directory
+sudo chown $USER:$USER $THEOS -R
 ```
+(More information in the [**Theos installation guide**](https://theos.dev/docs/installation-linux))
 
 ## Building
 
 ### 1. Clone the repository
 
 ```bash
-git clone --recursive [https://github.com/usedoperative-sudo/ikemen-go-ios.git](https://github.com/usedoperative-sudo/ikemen-go-ios.git)
+git clone --recursive https://github.com/usedoperative-sudo/ikemen-go-ios.git
 cd ikemen-go-ios
 
 ```
@@ -118,7 +121,7 @@ ikemen-go-ios/
 * **[Ikemen GO](https://github.com/ikemen-engine/Ikemen-GO)** — upstream engine
 * **[MoltenVK](https://github.com/KhronosGroup/MoltenVK)** — Vulkan on Metal
 * **[M.U.G.E.N](https://www.google.com/search?q=https://mugenengine.com/kelas)** — original fighting game engine by Elecbyte
-* **[Theos](https://theos.dev/)** — iOS build system
+* **[Theos](https://theos.dev/)** — iOS build system for jailbroken iDevices or non-Mac environments 
 * **[SDL2](https://www.libsdl.org/)** — multimedia library
 * **[FFmpeg](https://ffmpeg.org/)** — audio/video processing
 * **[libxmp](https://xmp.sourceforge.net/)** — module music player
