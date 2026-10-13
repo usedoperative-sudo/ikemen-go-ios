@@ -13,6 +13,11 @@ IKEMENGo/engine/libengine.h
 # Engine runtime data bundled into the app (regenerable from upstream)
 IKEMENGo/Resources/engine/
 
+# Default game assets assembled by ios/assets/fetch-default-assets.sh
+ios/assets/game/
+ios/assets/.cache/
+ios/assets/VERSION
+
 # ======================
 # Go
 # ======================

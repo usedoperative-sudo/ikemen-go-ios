@@ -39,9 +39,38 @@ NSString *IKEMENDefaultBaseDir(void) {
 	return [[paths objectAtIndex:0] stringByAppendingPathComponent:@"ikemen-go/IkemenGo"];
 }
 
-// On first launch, seed the base dir from the bundled engine data (the
-// "data", "external", and "font" folders carried in the app bundle via
-// XXX_RESOURCE_DIRS in the Makefile). Idempotent: existing folders are kept.
+// Recursively copy src -> dst, creating anything missing but never replacing
+// an existing file. This lets a new build fill in game files that older
+// versions never shipped (e.g. the screenpack) while preserving user edits
+// such as a customised data/select.def or extra chars.
+static void IKCopyMissing(NSString *src, NSString *dst, NSFileManager *fm) {
+	BOOL dstIsDir = NO;
+	BOOL dstExists = [fm fileExistsAtPath:dst isDirectory:&dstIsDir];
+	if (!dstExists) {
+		NSError *err = nil;
+		if (![fm copyItemAtPath:src toPath:dst error:&err]) {
+			NSLog(@"IKEMEN: seeding %@ failed: %@", src, err);
+		}
+		return;
+	}
+	if (!dstIsDir) {
+		return; // a file already lives here; keep it
+	}
+	NSError *listErr = nil;
+	NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:src error:&listErr];
+	if (listErr) {
+		return;
+	}
+	for (NSString *child in children) {
+		IKCopyMissing([src stringByAppendingPathComponent:child],
+		              [dst stringByAppendingPathComponent:child], fm);
+	}
+}
+
+// On first launch (or after the bundled assets change) seed the base dir from
+// the runtime assets staged in the app ("data", "external", "font", "chars",
+// "stages", "sound", "video"). Seeding is a merge: existing files, including
+// user edits, are preserved and only missing files are added.
 static void seedEngineData(void) {
 	NSString *base = IKEMENDefaultBaseDir();
 	if (!base) {
@@ -56,19 +85,48 @@ static void seedEngineData(void) {
 		return;
 	}
 
-	NSArray *entries = @[ @"data", @"external", @"font" ];
+	// The bundled stamp changes whenever the default assets change. If it
+	// matches the marker already in Documents, there is nothing to do.
+	NSString *bundleVersionPath = [[[NSBundle mainBundle] resourcePath]
+		stringByAppendingPathComponent:@"ikemen-assets.version"];
+	NSString *bundleVersion = [NSString stringWithContentsOfFile:bundleVersionPath
+		encoding:NSUTF8StringEncoding error:NULL];
+	if (bundleVersion.length == 0) {
+		// Defensive: a stamp-less build still seeds once instead of on every launch.
+		bundleVersion = @"unversioned";
+	}
+	NSString *stampPath = [base stringByAppendingPathComponent:@".ikemen-assets-version"];
+	NSString *stamp = [NSString stringWithContentsOfFile:stampPath
+		encoding:NSUTF8StringEncoding error:NULL];
+
+	NSString *screenpackMarker = [base stringByAppendingPathComponent:@"data/ikemen1/system.def"];
+	BOOL needsSeed = YES;
+	if ([stamp isEqualToString:bundleVersion]
+		&& [fm fileExistsAtPath:screenpackMarker]) {
+		needsSeed = NO;
+	}
+	if (!needsSeed) {
+		return;
+	}
+
+	NSArray *entries = @[ @"data", @"external", @"font", @"chars", @"stages", @"sound", @"video" ];
+	NSString *res = [[NSBundle mainBundle] resourcePath];
 	for (NSString *entry in entries) {
-		NSString *src = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:entry];
-		NSString *dst = [base stringByAppendingPathComponent:entry];
-		if ([fm fileExistsAtPath:dst]) {
-			continue; // already seeded
+		NSString *src = [res stringByAppendingPathComponent:entry];
+		if (![fm fileExistsAtPath:src]) {
+			continue; // not bundled (e.g. an empty optional dir was omitted)
 		}
-		NSError *copyErr = nil;
-		if (![fm copyItemAtPath:src toPath:dst error:&copyErr]) {
-			NSLog(@"IKEMEN: seeding %@ failed: %@", entry, copyErr);
+		IKCopyMissing(src, [base stringByAppendingPathComponent:entry], fm);
+	}
+
+	if (bundleVersion.length > 0) {
+		NSError *writeErr = nil;
+		if (![bundleVersion writeToFile:stampPath atomically:YES
+			encoding:NSUTF8StringEncoding error:&writeErr]) {
+			NSLog(@"IKEMEN: writing asset stamp failed: %@", writeErr);
 		}
 	}
-	NSLog(@"IKEMEN: engine data seeded into %@", base);
+	NSLog(@"IKEMEN: runtime assets merged into %@ (%@)", base, bundleVersion);
 }
 
 // Crash log directory, resolved once at startup so the signal handler can use
