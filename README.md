@@ -17,8 +17,6 @@ Play classic M.U.G.E.N characters, stages, and screenpacks on your iOS device wi
 - **SDL2, FFmpeg, and libxmp support** — robust multimedia handling for audio, background videos, and module music formats (MOD/XM/S3M/IT).
 - **Game controller support** — MFi and GameController framework controllers work out of the box.
 - **File sharing** — game data lives in `Documents/ikemen-go/IkemenGo`, fully accessible via the iOS Files app.
-- **Native crash logging** — hard crashes (SIGSEGV/SIGABRT) write a native backtrace to `save/logs/native_crash.log`.
-- **Lifecycle logging** — background/foreground events and Vulkan recovery steps are appended to `save/logs/lifecycle.log` (readable from the iOS Files app).
 
 ## Prerequisites
 
@@ -103,7 +101,7 @@ Documents/ikemen-go/IkemenGo/
 2. Edit the select screen file in `data/` to include them.
 3. Restart the app.
 
-> **Memory note for heavy content:** iOS enforces strict memory limits per app. In Tag/Simul/Turns modes, keeping every character fully loaded in memory can cause the **Jetsam** watchdog to kill the app without warning. Avoid overly heavy custom fighters or stages with long background videos, or mitigate this by using the **GetMoreRAM** app by [hugeBlack](https://github.com/hugeBlack/GetMoreRam).
+> **Memory note for large content:** iOS enforces strict memory limits per app. In Tag/Simul/Turns modes, keeping every character fully loaded in memory can cause the **Jetsam** watchdog to kill the app without warning. Avoid overly large custom fighters or stages with long background videos, or mitigate this by using the **GetMoreRAM** app by [hugeBlack](https://github.com/hugeBlack/GetMoreRam).
 
 ## Project Structure
 
@@ -132,4 +130,4 @@ ikemen-go-ios/
 
 ## License
 
-MIT License — see [LICENSE](https://www.google.com/search?q=LICENSE) for details. FFmpeg is used under LGPL v2.1.
+MIT License — see [LICENSE](https://github.com/usedoperative-sudo/ikemen-go-ios/blob/main/LICENSE) for details. FFmpeg is used under LGPL v2.1.
