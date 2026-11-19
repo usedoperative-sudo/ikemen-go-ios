@@ -120,7 +120,7 @@ ikemen-go-ios/
 
 * **[Ikemen GO](https://github.com/ikemen-engine/Ikemen-GO)** — upstream engine
 * **[MoltenVK](https://github.com/KhronosGroup/MoltenVK)** — Vulkan on Metal
-* **[M.U.G.E.N](https://www.google.com/search?q=https://mugenengine.com/kelas)** — original fighting game engine by Elecbyte
+* **[M.U.G.E.N](https://en.wikipedia.org/wiki/Mugen_(game_engine))** — original fighting game engine by Elecbyte
 * **[Theos](https://theos.dev/)** — iOS build system for jailbroken iDevices or non-Mac environments 
 * **[SDL2](https://www.libsdl.org/)** — multimedia library
 * **[FFmpeg](https://ffmpeg.org/)** — audio/video processing
