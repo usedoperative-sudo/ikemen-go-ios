@@ -17,9 +17,12 @@
 
 #ifndef __OBJC__
 void IkemenAttachMetalLayer(uint32_t sdlWindowID);
+void IkemenAttachGLESOverlay(uint32_t sdlWindowID);
+void IkemenRefreshMetalLayer(void);
 #else
 @interface MetalContainerView : UIView
 @property (nonatomic, weak) CAMetalLayer *metalLayer;
+- (void)updateMetalDrawable;
 @end
 BOOL IkemenOrientationIsLocked(void);
 void IkemenLockOrientationToCurrent(void);

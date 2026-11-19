@@ -872,6 +872,11 @@ func (s *System) keepAlive() {
 }
 
 func (s *System) await(fps int) bool {
+	// Must run before the renderingPaused gate: BeginFrame is skipped while
+	// paused, so this is the only place that can detect a return to foreground.
+	if runtime.GOOS == "ios" {
+		s.syncIOSRenderState()
+	}
 	if !s.frameSkip && !s.window.renderingPaused {
 		// Render the finished frame
 		gfx.EndFrame()

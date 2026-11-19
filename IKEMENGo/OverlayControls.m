@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>   // CAMetalLayer, referenced by SDLWindowFix.h
 #import "SDLWindowFix.h"            // IKEMEN_PORTRAIT_GAME_BAND_RATIO (portrait layout)
 #import <SDL2/SDL.h>
+#import <CoreHaptics/CoreHaptics.h>
 
 // On-screen control IDs (UI tags).
 // 0..3 directions, 4..9 the six attack buttons, 10 start, 13 menu.
@@ -120,20 +121,30 @@ static void IKENHandleDirection(int idx, BOOL on) {
 
 // Haptic feedback for the on-screen controller. The virtual SDL gamepad is the
 // only input device on iOS, so we mirror what a physical controller would do:
-//   - attack / face buttons (A B C X Y Z): a medium tap
+//   - attack / face buttons (A B C X Y Z): a gentle but clear tap
 //   - START / MENU: a softer tap
-//   - D-pad entering a new direction: a light tap
-// Fresh generator per tap (Apple: "Creating a feedback generator is lightweight,
-// so you can create a new one for each interaction") with prepare() on touch
-// down and impactOccurred() on the next run-loop tick for minimum latency.
-// This works reliably in LiveContainer where persistent generators can stall.
+//   - D-pad entering a new direction: a very light detent click
+//   - releasing a button / leaving the D-pad: the lightest tick
+// UIKit impact generators were unreliable in this sideloaded/LiveContainer
+// setup, and AudioServices' vibrate is far too strong for rapid controls.
+// CoreHaptics drives the Taptic Engine directly with short, low-intensity
+// transients, which gives controlled clicks instead of a full buzz.
 @interface IkemenHaptics : NSObject
+@property (nonatomic, strong) CHHapticEngine *engine;
+@property (nonatomic, strong) NSMutableSet<id<CHHapticPatternPlayer>> *players;
 + (instancetype)shared;
+- (void)prepare;
+- (void)warmUp;
 - (void)tapLight;
 - (void)tapMedium;
+- (void)tick;
+- (void)tapRelease;
 @end
 
-@implementation IkemenHaptics
+@implementation IkemenHaptics {
+    // CHHapticEngine has no isRunning property in this SDK; track it ourselves.
+    BOOL _engineRunning;
+}
 
 + (instancetype)shared {
     static IkemenHaptics *sShared = nil;
@@ -143,25 +154,129 @@ static void IKENHandleDirection(int idx, BOOL on) {
 }
 
 - (instancetype)init {
-    return [super init];
+    self = [super init];
+    if (self) {
+        _players = [NSMutableSet set];
+        [self prepare];
+    }
+    return self;
 }
 
-// Fire a light tap (D-pad, Start, Menu).
+- (void)prepare {
+    if (@available(iOS 13.0, *)) {
+        if (_engine) {
+            if (_engineRunning) {
+                return;
+            }
+            NSError *err = nil;
+            BOOL ok = [_engine startAndReturnError:&err];
+            _engineRunning = ok;
+            if (ok) {
+                return;
+            }
+            // A dead engine cannot be revived; drop it and build a fresh one.
+            _engine = nil;
+        }
+
+        NSError *err = nil;
+        CHHapticEngine *engine = [[CHHapticEngine alloc] initAndReturnError:&err];
+        if (!engine) {
+            return;
+        }
+
+        engine.autoShutdownEnabled = NO;
+        __weak CHHapticEngine *weakEngine = engine;
+        __weak IkemenHaptics *weakSelf = self;
+        engine.resetHandler = ^{
+            IkemenHaptics *strongSelf = weakSelf;
+            // Apple requires releasing all players after a server reset.
+            [strongSelf.players removeAllObjects];
+            NSError *restartErr = nil;
+            strongSelf->_engineRunning = [weakEngine startAndReturnError:&restartErr];
+        };
+        engine.stoppedHandler = ^(CHHapticEngineStoppedReason reason) {
+            IkemenHaptics *strongSelf = weakSelf;
+            strongSelf->_engineRunning = NO;
+            NSError *restartErr = nil;
+            strongSelf->_engineRunning = [weakEngine startAndReturnError:&restartErr];
+        };
+
+        // Haptics-only mode keeps CoreHaptics independent of the game's audio
+        // session; explicitly unmute haptics in case the system defaulted on.
+        engine.playsHapticsOnly = YES;
+        engine.isMutedForHaptics = NO;
+
+        BOOL ok = [engine startAndReturnError:&err];
+        _engineRunning = ok;
+        if (!ok) {
+            return;
+        }
+        _engine = engine;
+    }
+}
+
+- (void)buzzIntensity:(float)intensity sharpness:(float)sharpness {
+    if (@available(iOS 13.0, *)) {
+        [self prepare];
+        if (!_engine) {
+            return;
+        }
+        NSError *err = nil;
+        CHHapticEventParameter *ip =
+            [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticIntensity
+                                                         value:intensity];
+        CHHapticEventParameter *sp =
+            [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticSharpness
+                                                         value:sharpness];
+        CHHapticEvent *event =
+            [[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticTransient
+                                          parameters:@[ip, sp]
+                                        relativeTime:0];
+        CHHapticPattern *pattern =
+            [[CHHapticPattern alloc] initWithEvents:@[event] parameters:@[] error:&err];
+        if (!pattern) {
+            return;
+        }
+        id<CHHapticPatternPlayer> player = [_engine createPlayerWithPattern:pattern error:&err];
+        if (!player) {
+            return;
+        }
+        // Players are one-shot; keeping a bounded set prevents ARC from
+        // releasing an in-flight player before CoreHaptics finishes it.
+        if (_players.count > 48) {
+            [_players removeAllObjects];
+        }
+        [_players addObject:player];
+        [player startAtTime:CHHapticTimeImmediate error:&err];
+    }
+}
+
+- (void)warmUp {
+    [self prepare];
+    if (_engineRunning) {
+        // One gentle tap at launch primes the Taptic Engine.
+        [self buzzIntensity:0.55f sharpness:0.45f];
+    }
+}
+
 - (void)tapLight {
-    UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
-    [gen prepare];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [gen impactOccurred];
-    });
+    // START / MENU — gentle but clearly perceptible.
+    [self buzzIntensity:0.45f sharpness:0.40f];
 }
 
-// Fire a medium tap (attack buttons A/B/C/X/Y/Z).
 - (void)tapMedium {
-    UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [gen prepare];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [gen impactOccurred];
-    });
+    // Face buttons A B C X Y Z — the main "thump".
+    [self buzzIntensity:0.65f sharpness:0.50f];
+}
+
+- (void)tick {
+    // D-pad detent when entering a new direction.
+    [self buzzIntensity:0.35f sharpness:0.35f];
+}
+
+- (void)tapRelease {
+    // Lightest tick when releasing a button / leaving the D-pad.
+    [self buzzIntensity:0.25f sharpness:0.25f];
 }
 
 @end
@@ -220,10 +335,10 @@ static void IKENHandleDirection(int idx, BOOL on) {
     IKENSetCardinalState(idx, on);
     if (_last[idx] != on) {
         _last[idx] = on;
-        // Tap only when a direction is newly pressed (not on release), so
-        // gliding across sectors feels like a d-pad detent rather than buzzing.
+        // Tap on a newly pressed direction; release gets one soft tick from
+        // releaseAll, so gliding across sectors feels like a d-pad detent.
         if (on) {
-            [[IkemenHaptics shared] tapLight];
+            [[IkemenHaptics shared] tick];
         }
         IKENHandleDirection(idx, on);
     }
@@ -250,8 +365,13 @@ static void IKENHandleDirection(int idx, BOOL on) {
 }
 
 - (void)releaseAll {
+    BOOL wasActive = NO;
+    for (int i = 0; i < 4; i++) {
+        if (_last[i]) { wasActive = YES; break; }
+    }
     _curDir = -1;
     for (int i = 0; i < 4; i++) [self setCardinal:i on:NO];
+    if (wasActive) [[IkemenHaptics shared] tapRelease];
     [self setNeedsDisplay];
 }
 
@@ -260,11 +380,7 @@ static void IKENHandleDirection(int idx, BOOL on) {
     CGFloat dy = p.y - _cy;
     CGFloat len = sqrtf(dx * dx + dy * dy);
     if (len < DPAD_DEADZONE) {
-        if (_curDir != -1) {
-            _curDir = -1;
-            for (int i = 0; i < 4; i++) [self setCardinal:i on:NO];
-            [self setNeedsDisplay];
-        }
+        if (_curDir != -1) [self releaseAll];
         return;
     }
     CGFloat ang = atan2f(dy, dx); // radians, x right / y down
@@ -463,12 +579,15 @@ static void IKENHandleDirection(int idx, BOOL on) {
 
 - (void)buttonUp:(UIButton *)sender {
     int keyId = (int)sender.tag;
+    BOOL wasHeld = [_btnHeld[@(keyId)] boolValue];
     _btnHeld[@(keyId)] = @NO;
     IKENHandleButton(keyId, NO);
+    if (wasHeld) [[IkemenHaptics shared] tapRelease];
 }
 
-// No persistent generators to warm up; kept for API compatibility.
-- (void)warmUpHaptics { }
+- (void)warmUpHaptics {
+    [[IkemenHaptics shared] warmUp];
+}
 
 - (void)layoutSubviews {
     [super layoutSubviews];

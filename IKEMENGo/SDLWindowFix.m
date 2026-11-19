@@ -14,8 +14,10 @@
 #import <SDL2/SDL.h>
 #import <SDL2/SDL_metal.h>
 #import <SDL2/SDL_syswm.h>
+#import "OverlayControls.h"
 
 static __weak UIWindow *sSDLWindow = nil;
+static __weak MetalContainerView *sMetalHostView = nil;
 
 UIWindow *IkemenGetSDLWindow(void) {
     return sSDLWindow;
@@ -34,6 +36,10 @@ UIInterfaceOrientationMask IkemenLockedOrientationMask(void) {
 @implementation MetalContainerView
 - (void)layoutSubviews {
     [super layoutSubviews];
+    [self updateMetalDrawable];
+}
+
+- (void)updateMetalDrawable {
     if (!self.metalLayer) {
         return;
     }
@@ -66,6 +72,23 @@ UIInterfaceOrientationMask IkemenLockedOrientationMask(void) {
     [CATransaction commit];
 }
 @end
+
+// Called after returning from background. UIKit does not always relayout the
+// host view while the app is suspended, so the CAMetalLayer drawable size can
+// be stale/zero when MoltenVK creates the new swapchain. Force it in sync.
+void IkemenRefreshMetalLayer(void) {
+    MetalContainerView *view = sMetalHostView;
+    if (!view) {
+        NSLog(@"[SDLFix] IkemenRefreshMetalLayer: no host view");
+        return;
+    }
+    [view setNeedsLayout];
+    [view layoutIfNeeded];
+    [view updateMetalDrawable];
+    CAMetalLayer *ml = view.metalLayer;
+    NSLog(@"[SDLFix] IkemenRefreshMetalLayer: bounds=%@ drawable=%@",
+          NSStringFromCGSize(view.bounds.size), NSStringFromCGSize(ml.drawableSize));
+}
 
 void IkemenLockOrientationToCurrent(void) {
     if (sLocked) {
@@ -168,6 +191,7 @@ void IkemenAttachMetalLayer(uint32_t sdlWindowID) {
     [ml removeFromSuperlayer];
     [metalHostView.layer addSublayer:ml];
     metalHostView.metalLayer = ml;
+    sMetalHostView = metalHostView;
     ml.frame = hostView.bounds;
     [hostView insertSubview:metalHostView atIndex:0];
     [NSLayoutConstraint activateConstraints:@[
@@ -176,4 +200,70 @@ void IkemenAttachMetalLayer(uint32_t sdlWindowID) {
         [metalHostView.leadingAnchor constraintEqualToAnchor:hostView.leadingAnchor],
         [metalHostView.trailingAnchor constraintEqualToAnchor:hostView.trailingAnchor]
     ]];
+}
+// GLES keeps SDL's own full-screen UIWindow in front (there is no CAMetalLayer
+// to move into the host view). Move the existing touch overlay into that SDL
+// view so it stays above the GL surface and keeps receiving touches.
+void IkemenAttachGLESOverlay(uint32_t sdlWindowID) {
+    NSLog(@"[SDLFix] IkemenAttachGLESOverlay called, id=%u\n", sdlWindowID);
+
+    SDL_Window *window = SDL_GetWindowFromID(sdlWindowID);
+    if (!window) {
+        NSLog(@"[SDLFix] GLES overlay: SDL_GetWindowFromID returned NULL\n");
+        return;
+    }
+
+    SDL_SysWMinfo wmInfo;
+    SDL_VERSION(&wmInfo.version);
+    if (!SDL_GetWindowWMInfo(window, &wmInfo)) {
+        NSLog(@"[SDLFix] GLES overlay: SDL_GetWindowWMInfo failed: %s\n", SDL_GetError());
+        return;
+    }
+
+    UIWindow *sdlUIWindow = wmInfo.info.uikit.window;
+    UIView *sdlContentView = sdlUIWindow.rootViewController.view;
+    if (!sdlUIWindow || !sdlContentView) {
+        NSLog(@"[SDLFix] GLES overlay: SDL window/view is nil\n");
+        return;
+    }
+
+    IkemenOverlayView *overlay = nil;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (w == sdlUIWindow || !w.rootViewController) {
+            continue;
+        }
+        for (UIView *v in w.rootViewController.view.subviews) {
+            if ([v isKindOfClass:[IkemenOverlayView class]]) {
+                overlay = (IkemenOverlayView *)v;
+                break;
+            }
+        }
+        if (overlay) {
+            break;
+        }
+    }
+    if (!overlay) {
+        NSLog(@"[SDLFix] GLES overlay: no IkemenOverlayView found\n");
+        return;
+    }
+
+    UIView *oldHostView = overlay.superview;
+    if (oldHostView) {
+        for (NSLayoutConstraint *c in [oldHostView.constraints copy]) {
+            if (c.firstItem == overlay || c.secondItem == overlay) {
+                [oldHostView removeConstraint:c];
+            }
+        }
+        [overlay removeFromSuperview];
+    }
+
+    overlay.translatesAutoresizingMaskIntoConstraints = YES;
+    overlay.frame = sdlUIWindow.bounds;
+    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [sdlContentView addSubview:overlay];
+    [sdlContentView bringSubviewToFront:overlay];
+    [sdlUIWindow makeKeyAndVisible];
+
+    NSLog(@"[SDLFix] GLES overlay attached: frame=%@ window=%@\n",
+          NSStringFromCGRect(overlay.frame), NSStringFromCGRect(sdlUIWindow.bounds));
 }

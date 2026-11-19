@@ -11,7 +11,7 @@
 #   - deps/ios-sdl     SDL2 2.32.4 (UIKit driver, Vulkan+Metal enabled)
 #   - deps/ios-ffmpeg  FFmpeg 8.0.3 (arm64 iOS static)
 #   - deps/ios-libxmp  libxmp 4.7.3
-#   - /opt/theos/sdks/iPhoneOS16.5.sdk (or override IOS_SDK)
+#   - /opt/theos/sdks/iPhoneOS26.5.sdk (or override IOS_SDK)
 #   - Go >= 1.27
 set -euo pipefail
 
@@ -20,7 +20,7 @@ ENGINE="$REPO/ios/engine"
 DEPS="$REPO/deps"
 APP="$REPO/IKEMENGo"
 
-SDK="${IOS_SDK:-/opt/theos/sdks/iPhoneOS16.5.sdk}"
+SDK="${IOS_SDK:-/opt/theos/sdks/iPhoneOS26.5.sdk}"
 TARGET="${IOS_TARGET:-arm64-apple-ios15.0}"
 LD="${IOS_LD:-/usr/bin/ld64.lld}"
 OUT_DIR="$APP/engine"
@@ -49,13 +49,15 @@ export CXX="clang++ --target=${TARGET} -isysroot ${SDK}"
 export CGO_CFLAGS="-DSDL_MAIN_HANDLED \
   -I${DEPS}/ios-sdl/include -I${DEPS}/ios-sdl/include/SDL2 \
   -I${DEPS}/ios-libxmp/include \
+  -I${DEPS}/ios-ffmpeg/include \
   -I${APP} \
   -isysroot ${SDK} \
   -Wno-error=incompatible-pointer-types -Wno-incompatible-pointer-types \
   -Wno-deprecated-non-prototype -Wno-unused-command-line-argument"
 export CGO_CXXFLAGS="${CGO_CFLAGS}"
 export CGO_LDFLAGS="-fuse-ld=${LD} -Wl,-platform_version,ios,15.0,15.0 \
-  -L${DEPS}/ios-libxmp/lib -L${DEPS}/ios-ffmpeg/lib -L${DEPS}/ios-sdl/lib"
+  -L${DEPS}/ios-libxmp/lib -L${DEPS}/ios-ffmpeg/lib -L${DEPS}/ios-sdl/lib \
+  -framework OpenGLES"
 export PKG_CONFIG_PATH="${DEPS}/ios-sdl/lib/pkgconfig:${DEPS}/ios-ffmpeg/lib/pkgconfig:${DEPS}/ios-libxmp/lib/pkgconfig"
 
 # In-game version string. The engine draws it verbatim in the screenpack footer
@@ -67,9 +69,9 @@ export PKG_CONFIG_PATH="${DEPS}/ios-sdl/lib/pkgconfig:${DEPS}/ios-ffmpeg/lib/pkg
 # and a stray commit hash all glued together. Override on the command line when
 # bumping either number:
 #   IKEMEN_ENGINE_VERSION=<upstream Ikemen-GO release>   (default 1.0.0)
-#   IKEMEN_PORT_VERSION=<this iOS port's release>        (default 1.0)
+#   IKEMEN_PORT_VERSION=<this iOS port's release>        (default 1.1)
 IKEMEN_ENGINE_VERSION="${IKEMEN_ENGINE_VERSION:-1.0.0}"
-IKEMEN_PORT_VERSION="${IKEMEN_PORT_VERSION:-1.0}"
+IKEMEN_PORT_VERSION="${IKEMEN_PORT_VERSION:-1.1}"
 VERSION="${IKEMEN_PORT_VERSION}_${IKEMEN_ENGINE_VERSION}"
 BUILDTIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 

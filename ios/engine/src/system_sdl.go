@@ -51,14 +51,28 @@ func (s *System) newWindow(w, h int) (*Window, error) {
 		}
 		fullscreen = true
 	} else if runtime.GOOS == "ios" {
-		// Once again on iOS, flags are the critical part.
+		// Flags are the critical part on iOS. GLES needs an OpenGL window and
+		// an ES 3.0 context; Vulkan keeps the CAMetalLayer/MoltenVK path.
+		renderName := gfx.GetName()
+		var windowFlags sdl.WindowFlags
+		if renderName == "OpenGL ES 3.0" || renderName == "OpenGL ES 3.2" {
+			sdl.GLSetAttribute(sdl.GL_CONTEXT_PROFILE_MASK, sdl.GL_CONTEXT_PROFILE_ES)
+			sdl.GLSetAttribute(sdl.GL_CONTEXT_MAJOR_VERSION, 3)
+			sdl.GLSetAttribute(sdl.GL_CONTEXT_MINOR_VERSION, 0)
+			sdl.GLSetAttribute(sdl.GL_DOUBLEBUFFER, 1)
+			sdl.GLSetAttribute(sdl.GL_ALPHA_SIZE, 0)
+			sdl.GLSetAttribute(sdl.GL_DEPTH_SIZE, 24)
+			windowFlags |= sdl.WINDOW_OPENGL
+		} else {
+			windowFlags |= sdl.WINDOW_VULKAN
+		}
 		mode, err := sdl.GetDesktopDisplayMode(0)
 		window, err = sdl.CreateWindow(
 			s.cfg.Config.WindowTitle,
 			sdl.WINDOWPOS_UNDEFINED,
 			sdl.WINDOWPOS_UNDEFINED,
 			mode.W, mode.H,
-			sdl.WINDOW_SHOWN|sdl.WINDOW_VULKAN|sdl.WINDOW_FULLSCREEN|sdl.WINDOW_ALLOW_HIGHDPI|sdl.WINDOW_BORDERLESS,
+			sdl.WINDOW_SHOWN|windowFlags|sdl.WINDOW_FULLSCREEN|sdl.WINDOW_ALLOW_HIGHDPI|sdl.WINDOW_BORDERLESS,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create window: %w", err)
@@ -399,22 +413,93 @@ func (w *Window) UpdateDebugFPS() {
 	sys.gameFPS += (instant - sys.gameFPS) * a
 }
 
+// syncIOSRenderState runs every frame from System.await(), including while
+// renderingPaused is true. BeginFrame is skipped while paused, so recovery
+// cannot live there. UIKit's applicationState is the authoritative signal;
+// lifecycle events are unreliable and are only used for logging.
+func (s *System) syncIOSRenderState() {
+	if runtime.GOOS != "ios" {
+		return
+	}
+	rvk, ok := gfx.(*Renderer_VK)
+	if !ok || !rvk.firstFrameDrawn {
+		// Startup: applicationState can be Inactive even though the renderer
+		// is fully usable, so do not apply the pause logic before frame one.
+		return
+	}
+
+	if !nativeIsAppActive() {
+		if !s.window.renderingPaused || !rvk.surfaceLost {
+			LogLifecycle("app inactive (poll): pausing renderer")
+			rvk.surfaceLost = true
+			s.window.renderingPaused = true
+			// Drop the frame that was open when we paused; free the mutex.
+			rvk.AbortFrame()
+		}
+		return
+	}
+
+	if !s.window.renderingPaused && !rvk.surfaceLost {
+		return
+	}
+
+	LogLifecycle("app active (poll): recovering surface")
+	// UIKit may not have relaid out the host view while suspended. Refresh the
+	// CAMetalLayer drawable size before MoltenVK creates the new swapchain.
+	refreshIOSMetalLayer()
+	// A transient device-lost report from the background transition is
+	// resumable with MVK_CONFIG_RESUME_LOST_DEVICE; give recreation a chance.
+	if rvk.deviceLost {
+		LogLifecycle("app active (poll): clearing transient deviceLost")
+		rvk.deviceLost = false
+	}
+	rvk.AbortFrame()
+	if !rvk.RecreateSurfaceAndSwapchain() {
+		LogLifecycle("app active (poll): recreation failed, will retry")
+		return
+	}
+	LogLifecycle("app active (poll): surface recovered")
+	s.window.renderingPaused = false
+}
+
 func (w *Window) pollEvents() {
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 		switch t := event.(type) {
 		case sdl.CommonEvent:
-			// Android Vulkan behavior (Activity background/resume)
+			// SDL can deliver a foreground event while the engine is still
+			// initializing. Ignore it until markEngineReady() has run.
+			if !lifecycleReady && (t.Type == sdl.APP_DIDENTERBACKGROUND || t.Type == sdl.APP_DIDENTERFOREGROUND) {
+				LogLifecycle("ignoring early SDL lifecycle event type=%d", t.Type)
+				continue
+			}
+			// On iOS these events are logged only: System.syncIOSRenderState()
+			// drives all state changes from UIKit's applicationState.
+			// Android still uses the events for Activity resume.
 			switch t.Type {
 			case sdl.APP_WILLENTERBACKGROUND:
 			case sdl.APP_DIDENTERBACKGROUND:
-				if rvk, ok := gfx.(*Renderer_VK); ok {
-					rvk.Await()
-					w.renderingPaused = true
+				LogLifecycle("SDL APP_DIDENTERBACKGROUND")
+				if runtime.GOOS != "ios" {
+					if rvk, ok := gfx.(*Renderer_VK); ok {
+						rvk.Await()
+						rvk.surfaceLost = true
+						rvk.AbortFrame()
+						w.renderingPaused = true
+						LogLifecycle("background state: paused=%v surfaceLost=%v deviceLost=%v frameOpen=%v",
+							w.renderingPaused, rvk.surfaceLost, rvk.deviceLost, rvk.frameOpen)
+					}
 				}
 			case sdl.APP_DIDENTERFOREGROUND:
-				if rvk, ok := gfx.(*Renderer_VK); ok {
-					rvk.RecreateSurfaceAndSwapchain()
-					rvk.surfaceLost = false
+				LogLifecycle("SDL APP_DIDENTERFOREGROUND")
+				if runtime.GOOS != "ios" {
+					if rvk, ok := gfx.(*Renderer_VK); ok {
+						if w.renderingPaused || rvk.surfaceLost {
+							rvk.deviceLost = false
+							ok := rvk.RecreateSurfaceAndSwapchain()
+							LogLifecycle("foreground recreate: ok=%v paused=%v surfaceLost=%v deviceLost=%v",
+								ok, w.renderingPaused, rvk.surfaceLost, rvk.deviceLost)
+						}
+					}
 				}
 			}
 		case sdl.ControllerAxisEvent:

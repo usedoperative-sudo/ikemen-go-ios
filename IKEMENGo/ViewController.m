@@ -7,6 +7,7 @@
 //  "--assets <game base dir>" — the upstream engine's iOS contract
 //  (see src/util_ios.go in the engine source).
 #import "ViewController.h"
+#import "AppDelegate.h"
 #import "OverlayControls.h"
 
 #import <Foundation/Foundation.h>

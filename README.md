@@ -2,21 +2,23 @@
 
 An iOS port of [Ikemen GO](https://github.com/ikemen-engine/Ikemen-GO), an open-source fighting game engine compatible with [M.U.G.E.N](https://en.wikipedia.org/wiki/Mugen_(game_engine)) resources, written in Go.
 
-This port tracks **pure upstream Ikemen-GO** — `ios/engine/` is a synced copy of the upstream engine with two deliberate, documented deviations: a small crash-path guard in `src/main.go` (`handlePanic`) so pre-renderer-init crashes surface as readable errors instead of nested segfaults, and a MoltenVK config override (`MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0`) to prevent issues with MoltenVK's iOS 17+ residency-set code path.
+This port tracks **pure upstream Ikemen-GO** — `ios/engine/` is a synced copy of the upstream engine with a few deliberate, documented deviations: a small crash-path guard in `src/main.go` (`handlePanic`) so pre-renderer-init crashes surface as readable errors instead of nested segfaults, mobile background/foreground Vulkan recovery, MoltenVK config overrides (`MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0` for the iOS 17+ residency-set path and `MVK_CONFIG_RESUME_LOST_DEVICE=1` for transient device loss on backgrounding), and an optional OpenGL ES 3.0 renderer restored from the port's pre-Vulkan history.
 
 Play classic M.U.G.E.N characters, stages, and screenpacks on your iOS device with native on-screen touch controls.
 
 ## Features
 
-- **Pure upstream engine** — `ios/engine/` is a synced copy of upstream `ikemen-engine/Ikemen-GO` (with only a lightweight crash-path guard and the MoltenVK config override).
+- **Pure upstream engine** — `ios/engine/` is a synced copy of upstream `ikemen-engine/Ikemen-GO` (with only a lightweight crash-path guard, mobile lifecycle recovery, and the MoltenVK config overrides).
 - **Full M.U.G.E.N compatibility** — run characters, stages, screenpacks, and fonts from the M.U.G.E.N ecosystem.
-- **Vulkan rendering via MoltenVK** — the engine's Vulkan renderer runs smoothly on Metal through MoltenVK, linked and resolved via `dlsym`.
-- **Native on-screen controls** — virtual D-pad and attack buttons (A/B/C/X/Y/Z) plus Start and Menu, translated into a **virtual SDL game controller**. Features **haptic feedback** for button presses and D-pad direction changes.
+- **Vulkan rendering via MoltenVK** — the engine's Vulkan renderer runs smoothly on Metal through MoltenVK, linked and resolved via `dlsym`. It remains the default.
+- **Selectable OpenGL ES 3.0 renderer** — Options → Video → Renderer also offers `OpenGL ES 3.0`, using the system OpenGLES framework. Save the setting and relaunch the app to apply it.
+- **Native on-screen controls** — virtual D-pad and attack buttons (A/B/C/X/Y/Z) plus Start and Menu, translated into a **virtual SDL game controller**. Features gentle **CoreHaptics** taps for button presses, D-pad direction changes, and control releases.
 - **Portrait and landscape play** — in landscape the fight fills the screen beneath translucent controls; in portrait the engine renders the fight in the top band and controls sit below.
 - **SDL2, FFmpeg, and libxmp support** — robust multimedia handling for audio, background videos, and module music formats (MOD/XM/S3M/IT).
 - **Game controller support** — MFi and GameController framework controllers work out of the box.
 - **File sharing** — game data lives in `Documents/ikemen-go/IkemenGo`, fully accessible via the iOS Files app.
 - **Native crash logging** — hard crashes (SIGSEGV/SIGABRT) write a native backtrace to `save/logs/native_crash.log`.
+- **Lifecycle logging** — background/foreground events and Vulkan recovery steps are appended to `save/logs/lifecycle.log` (readable from the iOS Files app).
 
 ## Prerequisites
 

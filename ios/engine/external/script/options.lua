@@ -735,7 +735,7 @@ options.t_itemname = {
 	['gles32'] = function(t, item, cursorPosY, moveTxt)
 		if getInput(-1, motif.option_info.menu.done.key) then
 			sndPlay(motif.Snd, motif.option_info.cursor.move.snd[1], motif.option_info.cursor.move.snd[2])
-			modifyGameOption('Video.RenderMode', "OpenGL ES 3.2")
+			modifyGameOption('Video.RenderMode', getRuntimeOS() == 'ios' and "OpenGL ES 3.0" or "OpenGL ES 3.2")
 			options.modified = true
 			options.needReload = true
 			return false
@@ -1748,6 +1748,11 @@ function options.f_start()
 	-- create menu
 	options.menu = {title = main.f_itemnameUpper(motif.option_info.title.text, motif.option_info.menu.title.uppercase), submenu = {}, items = {}}
 	options.menu.loop = options.f_createMenu(options.menu, true)
+	local runtimeOS = getRuntimeOS()
+	if runtimeOS == 'ios' then
+		-- The same selector runs ES 3.0 on iOS (ES 3.2 is Android-only).
+		motif.option_info.menu.itemname['menuvideo_renderer_gles32'] = 'OpenGL ES 3.0'
+	end
 	local w = main.f_menuWindow(motif.option_info.menu)
 	local t_pos = {} --for storing current options.menu table position
 	local lastNum = 0
@@ -1817,12 +1822,11 @@ function options.f_start()
 		end
 	end
 	-- Runtime platform filtering
-	local runtimeOS = getRuntimeOS()
 	local excluded = {gles32 = true}
 	if runtimeOS == 'android' then
 		excluded = {keyboard = true, gl33 = true}
 	elseif runtimeOS == 'ios' then
-		excluded = {keyboard = true, gl33 = true, gles32 = true}
+		excluded = {keyboard = true, gl33 = true}
 	end
 	main.f_pruneMenu(options.menu, excluded)
 	main.f_prunePointers(options.t_vardisplayPointers, excluded)

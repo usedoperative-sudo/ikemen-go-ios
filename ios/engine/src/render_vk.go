@@ -1556,16 +1556,20 @@ type Renderer_VK struct {
 	// MoltenVK behavior
 	shouldDoPerDrawPushDrawConstants bool
 
-	// Android behavior
-	hasPushDescriptors  bool
-	surfaceLost         bool
-	frameOpen           bool
-	shadowPassActive    bool
-	shadowCmdRecorded   bool
-	droidDescriptorPool vk.DescriptorPool
-	droidBindingState   map[*VulkanProgramInfo]map[uint32]vk.WriteDescriptorSet
-	poolMutex           sync.Mutex // serializes access to droidDescriptorPool/droidBindingState/r.commandPools[0]
-	surfaceMutex        sync.Mutex // surface mutex (for Android activity resume)
+	// Android/iOS background behavior
+	hasPushDescriptors    bool
+	surfaceLost           bool
+	deviceLost            bool
+	frameOpen             bool
+	firstFrameDrawn       bool
+	recoveries            uint32
+	presentsAfterRecovery uint32
+	shadowPassActive      bool
+	shadowCmdRecorded     bool
+	droidDescriptorPool   vk.DescriptorPool
+	droidBindingState     map[*VulkanProgramInfo]map[uint32]vk.WriteDescriptorSet
+	poolMutex             sync.Mutex // serializes access to droidDescriptorPool/droidBindingState/r.commandPools[0]
+	surfaceMutex          sync.Mutex // surface mutex (for Android activity resume)
 
 	grabTexture *Texture_VK
 
@@ -2786,47 +2790,88 @@ func (r *Renderer_VK) CreateSwapchainImageViews(swapchain *VulkanSwapchainInfo) 
 	return nil
 }
 
-// Used for Android Activity resume
-func (r *Renderer_VK) RecreateSurfaceAndSwapchain() {
+// RecreateSurfaceAndSwapchain is called from the SDL foreground handler, when
+// no frame is open, and from BeginFrame as a retry. The locked variant lets
+// BeginFrame keep surfaceMutex held for the whole frame.
+func (r *Renderer_VK) RecreateSurfaceAndSwapchain() bool {
 	r.surfaceMutex.Lock()
 	defer r.surfaceMutex.Unlock()
-	vk.DeviceWaitIdle(r.device)
+	return r.recreateSurfaceAndSwapchainLocked()
+}
 
-	// Store the old sets (we cannot recreate them on mobile)
-	var oldSets []vk.DescriptorSet = make([]vk.DescriptorSet, 2)
-	for i := 0; i < 2; i++ {
-		oldSets[i] = r.renderTargets[i].descriptorSet
+// recreateSurfaceAndSwapchainLocked must be called with surfaceMutex held.
+func (r *Renderer_VK) recreateSurfaceAndSwapchainLocked() bool {
+	if r.deviceLost {
+		// The VkDevice itself is gone; surface/swapchain recreation cannot
+		// recover it. Keep rendering paused until the process restarts.
+		return false
 	}
 
+	if res := vk.DeviceWaitIdle(r.device); res != vk.Success {
+		r.surfaceLost = true
+		if res == vk.ErrorDeviceLost {
+			r.deviceLost = true
+			LogLifecycle("[ERROR] RecreateSurfaceAndSwapchain: vk.DeviceWaitIdle failed with %s", vk.Error(res))
+			return false
+		}
+		LogLifecycle("[WARN] RecreateSurfaceAndSwapchain: vk.DeviceWaitIdle failed with %s", vk.Error(res))
+		sys.window.renderingPaused = false
+		return false
+	}
+
+	// Store the old sets (we cannot recreate them on mobile)
+	var oldSets [2]vk.DescriptorSet
 	if r.renderTargets[0] != nil {
+		oldSets[0] = r.renderTargets[0].descriptorSet
+		if r.renderTargets[1] != nil {
+			oldSets[1] = r.renderTargets[1].descriptorSet
+		}
 		r.DestroyRenderTarget(r.renderTargets[0])
-		r.DestroyRenderTarget(r.renderTargets[1])
+		if r.renderTargets[1] != nil {
+			r.DestroyRenderTarget(r.renderTargets[1])
+		}
+		r.renderTargets[0] = nil
+		r.renderTargets[1] = nil
+	}
+	if r.mainRenderTarget != nil {
 		r.DestroyRenderTarget(r.mainRenderTarget)
+		r.mainRenderTarget = nil
 	}
 	r.DestroySwapchain()
 
-	if r.surface != vk.NullSurface {
-		vk.DestroySurface(r.instance, r.surface, nil)
-		r.surface = vk.NullSurface
+	// On iOS the CAMetalLayer (and therefore the VkSurface) survives
+	// backgrounding. Destroying and recreating it can leave MoltenVK presenting
+	// to a stale layer, so only the swapchain is rebuilt. Android does need a
+	// fresh ANativeWindow-backed surface.
+	if runtime.GOOS != "ios" {
+		if r.surface != vk.NullSurface {
+			vk.DestroySurface(r.instance, r.surface, nil)
+			r.surface = vk.NullSurface
+		}
+
+		surface, err := sys.window.VulkanCreateSurface(r.instance)
+		if err != nil {
+			r.surfaceLost = true
+			sys.window.renderingPaused = false
+			LogLifecycle("[WARN] RecreateSurfaceAndSwapchain: vkCreateWindowSurface failed: %s", err)
+			return false
+		}
+		r.surface = vk.SurfaceFromPointer(uintptr(surface))
 	}
 
-	surface, err := sys.window.VulkanCreateSurface(r.instance)
-	if err != nil {
-		vk.DestroyInstance(r.instance, nil)
-		err = fmt.Errorf("[Recreate] vkCreateWindowSurface failed with %s", err)
-		panic(err)
-	}
-	r.surface = vk.SurfaceFromPointer(uintptr(surface))
-
-	err = r.CreateSwapchain(vk.NullSwapchain)
+	err := r.CreateSwapchain(vk.NullSwapchain)
 	if err != nil {
 		r.surfaceLost = true
-		return
+		sys.window.renderingPaused = false
+		LogLifecycle("[WARN] RecreateSurfaceAndSwapchain: CreateSwapchain failed: %s", err)
+		return false
 	}
 	err = r.CreateSwapChainFramebuffer(r.swapchains[0], r.swapchainRenderPass.renderPass)
 	if err != nil {
 		r.surfaceLost = true
-		return
+		sys.window.renderingPaused = false
+		LogLifecycle("[WARN] RecreateSurfaceAndSwapchain: CreateSwapChainFramebuffer failed: %s", err)
+		return false
 	}
 
 	msaa := sys.msaa
@@ -2863,8 +2908,17 @@ func (r *Renderer_VK) RecreateSurfaceAndSwapchain() {
 		vk.UpdateDescriptorSets(r.device, 1, writeDS, 0, nil)
 	}
 
+	// The new swapchain is usable: resume normal rendering.
+	LogLifecycle("swapchain recreated: extent=%dx%d imageCount=%d",
+		r.swapchains[0].extent.Width, r.swapchains[0].extent.Height, r.swapchains[0].imageCount)
+	r.recoveries++
+	r.presentsAfterRecovery = 0
+	// The fence from the pre-background frame may be unsignaled after a
+	// discarded frame; skip the next fence wait to avoid a 10-second stall.
+	r.firstFrame = true
 	r.surfaceLost = false
 	sys.window.renderingPaused = false
+	return true
 }
 func (r *Renderer_VK) RecreateSwapchain() {
 	vk.DeviceWaitIdle(r.device)
@@ -6659,9 +6713,57 @@ func (r *Renderer_VK) transitionHostVisibleToDeviceLocal(t *Texture_VK) error {
 	return nil
 }
 
+// resetDrawState initializes the state that every sprite draw relies on.
+// BeginFrame must call this before any early return; otherwise a skipped frame
+// leaves sprite/palette textures nil and the next draw faults in RenderQuadSetup.
+func (r *Renderer_VK) resetDrawState() {
+	r.renderShadowMap = false
+	r.VKState.currentProgram = nil
+	r.VKState.boundProgram = nil
+	r.vertexBufferOffset = 0
+	if r.spriteProgram != nil {
+		r.spriteProgram.uniformOffsetMap = make(map[interface{}]uint32)
+		r.spriteProgram.uniformBufferOffset = 0
+	}
+	if r.dummyTexture != nil {
+		r.currentSpriteTexture.spriteTexture = r.dummyTexture
+		r.currentSpriteTexture.palTexture = r.dummyTexture
+		r.VKState.spriteTexture = r.dummyTexture
+		r.VKState.palTexture = r.dummyTexture
+	}
+	r.currentSpriteTexture.customTex1 = nil
+	r.currentSpriteTexture.customTex2 = nil
+	r.VKState.customTex1 = nil
+	r.VKState.customTex2 = nil
+	if r.modelProgram != nil {
+		r.modelProgram.uniformOffsetMap = make(map[interface{}]uint32)
+		r.modelProgram.uniformBufferOffset = 0
+	}
+}
+
 func (r *Renderer_VK) BeginFrame(clearColor bool) {
 	r.surfaceMutex.Lock()
-	if sys.window.renderingPaused || r.surfaceLost {
+	r.resetDrawState()
+
+	// iOS background/foreground recovery is driven by System.await(), which
+	// runs every frame even while renderingPaused is true. BeginFrame is NOT
+	// called while paused, so it must never own the resume logic.
+	if r.deviceLost || sys.window.renderingPaused {
+		r.surfaceMutex.Unlock()
+		return
+	}
+
+	// Android still self-heals here because its resume path is event-driven.
+	if r.surfaceLost && runtime.GOOS == "android" {
+		if !r.recreateSurfaceAndSwapchainLocked() {
+			LogLifecycle("[INFO] Surface still lost on mobile, skipping frame")
+			r.surfaceMutex.Unlock()
+			return
+		}
+		LogLifecycle("[INFO] Surface recovered on mobile")
+	}
+
+	if r.surfaceLost {
 		r.surfaceMutex.Unlock()
 		return
 	}
@@ -6717,27 +6819,46 @@ func (r *Renderer_VK) BeginFrame(clearColor bool) {
 		r.setVSync = false
 		r.RecreateSwapchain()
 	}
+	// Acquire the next swapchain image for this frame.
 	res := vk.AcquireNextImage(r.device, r.swapchains[0].swapchain,
 		vk.MaxUint64, r.semaphores[0], vk.NullFence, &r.swapchains[0].currentImageIndex)
 	if res != vk.Success {
-		if res == vk.ErrorOutOfDate || res == vk.Suboptimal {
-			if res == vk.Suboptimal && runtime.GOOS != "ios" && runtime.GOOS != "android" {
-				LogMessage("[INFO] recreate swapchain")
-				r.RecreateSwapchain()
-				res = vk.AcquireNextImage(r.device, r.swapchains[0].swapchain,
-					vk.MaxUint64, r.semaphores[0], vk.NullFence, &r.swapchains[0].currentImageIndex)
-				if res != vk.Success {
-					// Try continue execution if error is suboptimal
-					if res == vk.Suboptimal {
-						LogMessage("[WARNING] vk.AcquireNextImage returned suboptimal after swapchain recreation")
-						// We're probably on Android and can recreate this
-					} else if res == vk.ErrorSurfaceLost {
-						r.surfaceLost = true
-						return
-					} else {
-						err := fmt.Errorf("vk.AcquireNextImage failed with %s", vk.Error(res))
-						panic(err)
+		if res == vk.ErrorDeviceLost {
+			r.deviceLost = true
+			r.surfaceLost = true
+			LogLifecycle("[ERROR] vk.AcquireNextImage failed with %s, device lost", vk.Error(res))
+			// frameOpen stays set so EndFrame releases surfaceMutex.
+			return
+		}
+		if runtime.GOOS == "ios" || runtime.GOOS == "android" {
+			if res == vk.Suboptimal {
+				LogLifecycle("[INFO] vk.AcquireNextImage returned suboptimal on mobile, ignoring")
+			} else {
+				// On mobile the surface becomes invalid on backgrounding.
+				// Let EndFrame release the frame lock, then retry recreation.
+				LogLifecycle("[INFO] AcquireNextImage failed with %s on mobile, marking surface lost", vk.Error(res))
+				r.surfaceLost = true
+				return
+			}
+		} else if res == vk.Suboptimal {
+			LogMessage("[INFO] recreate swapchain")
+			r.RecreateSwapchain()
+			res = vk.AcquireNextImage(r.device, r.swapchains[0].swapchain,
+				vk.MaxUint64, r.semaphores[0], vk.NullFence, &r.swapchains[0].currentImageIndex)
+			if res != vk.Success {
+				// Try continue execution if error is suboptimal
+				if res == vk.Suboptimal {
+					LogMessage("[WARNING] vk.AcquireNextImage returned suboptimal after swapchain recreation")
+					// We're probably on Android and can recreate this
+				} else if res == vk.ErrorSurfaceLost || res == vk.ErrorDeviceLost {
+					if res == vk.ErrorDeviceLost {
+						r.deviceLost = true
 					}
+					r.surfaceLost = true
+					return
+				} else {
+					err := fmt.Errorf("vk.AcquireNextImage failed with %s", vk.Error(res))
+					panic(err)
 				}
 			}
 		} else {
@@ -6821,24 +6942,6 @@ func (r *Renderer_VK) BeginFrame(clearColor bool) {
 			LayerCount:     1,
 		}})
 	}
-	r.renderShadowMap = false
-	r.VKState.currentProgram = nil
-	r.VKState.boundProgram = nil
-	r.vertexBufferOffset = 0
-	r.spriteProgram.uniformOffsetMap = make(map[interface{}]uint32)
-	r.spriteProgram.uniformBufferOffset = 0
-	r.currentSpriteTexture.spriteTexture = r.dummyTexture
-	r.currentSpriteTexture.palTexture = r.dummyTexture
-	r.currentSpriteTexture.customTex1 = nil
-	r.currentSpriteTexture.customTex2 = nil
-	r.VKState.spriteTexture = r.dummyTexture
-	r.VKState.palTexture = r.dummyTexture
-	r.VKState.customTex1 = nil
-	r.VKState.customTex2 = nil
-	if r.modelProgram != nil {
-		r.modelProgram.uniformOffsetMap = make(map[interface{}]uint32)
-		r.modelProgram.uniformBufferOffset = 0
-	}
 	// Fallback behavior
 	if !r.hasPushDescriptors {
 		r.poolMutex.Lock()
@@ -6852,7 +6955,8 @@ func (r *Renderer_VK) BeginFrame(clearColor bool) {
 }
 
 func (r *Renderer_VK) EndFrame() {
-	// prevent Activity wakeup crash (Android)
+	// frameOpen means BeginFrame is holding surfaceMutex. Always release it
+	// here, even when the frame must be discarded after backgrounding.
 	if !r.frameOpen {
 		return
 	}
@@ -6861,6 +6965,10 @@ func (r *Renderer_VK) EndFrame() {
 	}
 	r.frameOpen = false
 	defer r.surfaceMutex.Unlock()
+	if r.surfaceLost || r.deviceLost || sys.window.renderingPaused {
+		LogLifecycle("[INFO] EndFrame discarded stale frame")
+		return
+	}
 	if len(r.stagingImageBarriers[0]) > 0 || len(r.tempCommands) > 0 {
 		r.FlushTempCommands()
 	}
@@ -7118,10 +7226,29 @@ func (r *Renderer_VK) EndFrame() {
 		SignalSemaphoreCount: 1,
 	}}
 
-	err := vk.Error(vk.QueueSubmit(r.queue, 1, submitInfo, r.fences[0]))
-	if err != nil {
-		err = fmt.Errorf("vk.QueueSubmit failed with %s", err)
-		panic(err)
+	submitRes := vk.QueueSubmit(r.queue, 1, submitInfo, r.fences[0])
+	if submitRes != vk.Success {
+		err := vk.Error(submitRes)
+		if submitRes == vk.ErrorDeviceLost {
+			r.deviceLost = true
+			LogLifecycle("[ERROR] vk.QueueSubmit failed with %s, device lost", err)
+		} else {
+			// A transient surface/device interruption on mobile must not
+			// panic here; EndFrame releases the frame lock on return.
+			LogLifecycle("[WARN] vk.QueueSubmit failed with %s, marking surface lost", err)
+		}
+		r.surfaceLost = true
+		return
+	}
+
+	// The first successful GPU submit means the Metal layer is live. Signal
+	// readiness here instead of at the end of engine initialization (which can
+	// return with an unmatched BeginFrame) or after QueuePresent (which may
+	// legitimately return VK_OUT_OF_DATE on the first frame).
+	if !r.firstFrameDrawn {
+		r.firstFrameDrawn = true
+		LogLifecycle("first frame submitted; enabling native lifecycle events")
+		markEngineReady()
 	}
 
 	imageIndices := []uint32{r.swapchains[0].currentImageIndex}
@@ -7135,6 +7262,7 @@ func (r *Renderer_VK) EndFrame() {
 	}
 
 	res := vk.QueuePresent(r.queue, &presentInfo)
+
 	if res != vk.Success {
 		if res == vk.ErrorOutOfDate || res == vk.Suboptimal {
 			if res == vk.Suboptimal && (runtime.GOOS == "ios" || runtime.GOOS == "android") {
@@ -7143,12 +7271,21 @@ func (r *Renderer_VK) EndFrame() {
 				LogMessage("[INFO] recreate swapchain")
 				r.RecreateSwapchain()
 			}
-		} else if res == vk.ErrorSurfaceLost {
+		} else if res == vk.ErrorDeviceLost || res == vk.ErrorSurfaceLost {
+			if res == vk.ErrorDeviceLost {
+				r.deviceLost = true
+				LogLifecycle("[ERROR] vk.QueuePresent failed with %s, device lost", vk.Error(res))
+			} else {
+				LogLifecycle("[WARN] vk.QueuePresent failed with %s, marking surface lost", vk.Error(res))
+			}
 			r.surfaceLost = true
 		} else {
 			err := fmt.Errorf("vk.QueuePresent failed with %s", vk.Error(res))
 			panic(err)
 		}
+	} else if r.recoveries > 0 && r.presentsAfterRecovery < 3 {
+		r.presentsAfterRecovery++
+		LogLifecycle("present after recovery #%d (recoveries=%d)", r.presentsAfterRecovery, r.recoveries)
 	}
 }
 
@@ -7162,7 +7299,33 @@ func (r *Renderer_VK) PrintVkState() {
 }
 
 func (r *Renderer_VK) Await() {
-	vk.QueueWaitIdle(r.queue)
+	if r.deviceLost {
+		return
+	}
+	res := vk.QueueWaitIdle(r.queue)
+	if res == vk.ErrorDeviceLost {
+		r.deviceLost = true
+		r.surfaceLost = true
+		LogLifecycle("[ERROR] vk.QueueWaitIdle failed with %s, device lost", vk.Error(res))
+	} else if res == vk.ErrorSurfaceLost {
+		r.surfaceLost = true
+		LogLifecycle("[WARN] vk.QueueWaitIdle failed with %s, marking surface lost", vk.Error(res))
+	}
+}
+
+// AbortFrame drops the frame currently being recorded. It must only be called
+// from the SDL lifecycle handler, which runs on the same goroutine as the
+// renderer; frameOpen means that goroutine owns surfaceMutex.
+func (r *Renderer_VK) AbortFrame() {
+	if !r.frameOpen {
+		return
+	}
+	r.frameOpen = false
+	// The aborted frame never reached QueueSubmit, so fence[0] was left
+	// unsignaled. Treat the next frame like the very first one: skip the fence
+	// wait, which would otherwise block for its full 10-second timeout.
+	r.firstFrame = true
+	r.surfaceMutex.Unlock()
 }
 
 func (r *Renderer_VK) SetPipeline() {
@@ -8180,6 +8343,25 @@ func (r *Renderer_VK) RenderQuadSetup() uint32 {
 	switchedProgram := r.VKState.boundProgram != targetProgram
 	r.VKState.boundProgram = targetProgram
 
+	// iOS can reach the sprite draw path while a frame is paused/aborted, after
+	// EndFrame has cleared the cached sprite/palette textures. Use the resident
+	// dummy texture for both sides of the comparison so the per-draw
+	// push-constant workaround never dereferences nil.
+	if r.dummyTexture != nil {
+		if r.VKState.spriteTexture == nil {
+			r.VKState.spriteTexture = r.dummyTexture
+		}
+		if r.currentSpriteTexture.spriteTexture == nil {
+			r.currentSpriteTexture.spriteTexture = r.dummyTexture
+		}
+		if r.VKState.palTexture == nil {
+			r.VKState.palTexture = r.dummyTexture
+		}
+		if r.currentSpriteTexture.palTexture == nil {
+			r.currentSpriteTexture.palTexture = r.dummyTexture
+		}
+	}
+
 	pipelineIndex, ok := targetProgram.pipelineIndexMap[r.VKState.VulkanPipelineState.VulkanBlendState]
 	if !ok {
 		panic("Pipeline not found")
@@ -8279,19 +8461,19 @@ func (r *Renderer_VK) RenderQuadSetup() uint32 {
 		})
 	}
 
-	if switchedProgram || r.VKState.spriteTexture != r.currentSpriteTexture.spriteTexture {
-		r.currentSpriteTexture.spriteTexture = r.VKState.spriteTexture
-		if r.VKState.spriteTexture.imageView == nil {
+	if spriteTex := r.VKState.spriteTexture; spriteTex != nil && (switchedProgram || spriteTex != r.currentSpriteTexture.spriteTexture) {
+		r.currentSpriteTexture.spriteTexture = spriteTex
+		if spriteTex.imageView == nil {
 			LogMessage("[WARN] imageView is nil!")
 		}
 		imageInfo := []vk.DescriptorImageInfo{
 			{
-				ImageLayout: r.VKState.spriteTexture.SampledLayout(),
-				ImageView:   r.VKState.spriteTexture.imageView,
+				ImageLayout: spriteTex.SampledLayout(),
+				ImageView:   spriteTex.imageView,
 				Sampler:     r.spriteSamplers[0],
 			},
 		}
-		if r.spriteTexture.filter {
+		if r.spriteTexture != nil && r.spriteTexture.filter {
 			imageInfo[0].Sampler = r.spriteSamplers[1]
 		}
 		descriptorWrites = append(descriptorWrites, vk.WriteDescriptorSet{
@@ -8305,16 +8487,21 @@ func (r *Renderer_VK) RenderQuadSetup() uint32 {
 	}
 
 	// MacOS and iOS MoltenVK workaround: push constants need to be set every draw call
-	if switchedProgram || r.VKState.palTexture != r.currentSpriteTexture.palTexture || r.shouldDoPerDrawPushDrawConstants {
-		if switchedProgram || r.VKState.palTexture.img != r.currentSpriteTexture.palTexture.img || r.VKState.palTexture.offset[0] != r.currentSpriteTexture.palTexture.offset[0] || r.VKState.palTexture.offset[1] != r.currentSpriteTexture.palTexture.offset[1] || r.shouldDoPerDrawPushDrawConstants {
-			uvst := r.VKState.palTexture.uvst
+	palTex := r.VKState.palTexture
+	prevPalTex := r.currentSpriteTexture.palTexture
+	if prevPalTex == nil {
+		prevPalTex = palTex
+	}
+	if palTex != nil && (switchedProgram || palTex != prevPalTex || r.shouldDoPerDrawPushDrawConstants) {
+		if switchedProgram || palTex.img != prevPalTex.img || palTex.offset[0] != prevPalTex.offset[0] || palTex.offset[1] != prevPalTex.offset[1] || r.shouldDoPerDrawPushDrawConstants {
+			uvst := palTex.uvst
 			vk.CmdPushConstants(r.commandBuffers[0], targetProgram.pipelineLayout, vk.ShaderStageFlags(vk.ShaderStageFragmentBit), 0, 16, unsafe.Pointer(&uvst))
 		}
-		if switchedProgram || r.VKState.palTexture.img != r.currentSpriteTexture.palTexture.img {
+		if switchedProgram || palTex.img != prevPalTex.img {
 			palImageInfo := []vk.DescriptorImageInfo{
 				{
-					ImageLayout: r.VKState.palTexture.SampledLayout(),
-					ImageView:   r.VKState.palTexture.imageView,
+					ImageLayout: palTex.SampledLayout(),
+					ImageView:   palTex.imageView,
 					Sampler:     r.spriteSamplers[0],
 				},
 			}
@@ -8327,7 +8514,7 @@ func (r *Renderer_VK) RenderQuadSetup() uint32 {
 				PImageInfo:      palImageInfo,
 			})
 		}
-		r.currentSpriteTexture.palTexture = r.VKState.palTexture
+		r.currentSpriteTexture.palTexture = palTex
 	}
 
 	// Assign the texture (custom shader only)
@@ -8337,21 +8524,23 @@ func (r *Renderer_VK) RenderQuadSetup() uint32 {
 		if texGrab == nil {
 			texGrab = r.dummyTexture
 		}
-		grabImageInfo := []vk.DescriptorImageInfo{
-			{
-				ImageLayout: texGrab.SampledLayout(),
-				ImageView:   texGrab.imageView,
-				Sampler:     r.spriteSamplers[0],
-			},
+		if texGrab != nil {
+			grabImageInfo := []vk.DescriptorImageInfo{
+				{
+					ImageLayout: texGrab.SampledLayout(),
+					ImageView:   texGrab.imageView,
+					Sampler:     r.spriteSamplers[0],
+				},
+			}
+			descriptorWrites = append(descriptorWrites, vk.WriteDescriptorSet{
+				SType:           vk.StructureTypeWriteDescriptorSet,
+				DstBinding:      4,
+				DstArrayElement: 0,
+				DescriptorCount: 1,
+				DescriptorType:  vk.DescriptorTypeCombinedImageSampler,
+				PImageInfo:      grabImageInfo,
+			})
 		}
-		descriptorWrites = append(descriptorWrites, vk.WriteDescriptorSet{
-			SType:           vk.StructureTypeWriteDescriptorSet,
-			DstBinding:      4,
-			DstArrayElement: 0,
-			DescriptorCount: 1,
-			DescriptorType:  vk.DescriptorTypeCombinedImageSampler,
-			PImageInfo:      grabImageInfo,
-		})
 
 		// --- Binding 5: tex1 ---
 		if switchedProgram || r.VKState.customTex1 != r.currentSpriteTexture.customTex1 {
@@ -8361,24 +8550,26 @@ func (r *Renderer_VK) RenderQuadSetup() uint32 {
 			if tex1 == nil {
 				tex1 = r.dummyTexture // 未指定時はクラッシュ防止のためダミーを送る
 			}
-			imageInfo1 := []vk.DescriptorImageInfo{
-				{
-					ImageLayout: tex1.SampledLayout(),
-					ImageView:   tex1.imageView,
-					Sampler:     r.spriteSamplers[0],
-				},
+			if tex1 != nil {
+				imageInfo1 := []vk.DescriptorImageInfo{
+					{
+						ImageLayout: tex1.SampledLayout(),
+						ImageView:   tex1.imageView,
+						Sampler:     r.spriteSamplers[0],
+					},
+				}
+				if tex1.filter {
+					imageInfo1[0].Sampler = r.spriteSamplers[1]
+				}
+				descriptorWrites = append(descriptorWrites, vk.WriteDescriptorSet{
+					SType:           vk.StructureTypeWriteDescriptorSet,
+					DstBinding:      5,
+					DstArrayElement: 0,
+					DescriptorCount: 1,
+					DescriptorType:  vk.DescriptorTypeCombinedImageSampler,
+					PImageInfo:      imageInfo1,
+				})
 			}
-			if tex1.filter {
-				imageInfo1[0].Sampler = r.spriteSamplers[1]
-			}
-			descriptorWrites = append(descriptorWrites, vk.WriteDescriptorSet{
-				SType:           vk.StructureTypeWriteDescriptorSet,
-				DstBinding:      5,
-				DstArrayElement: 0,
-				DescriptorCount: 1,
-				DescriptorType:  vk.DescriptorTypeCombinedImageSampler,
-				PImageInfo:      imageInfo1,
-			})
 		}
 
 		// --- Binding 6: tex2 ---
@@ -8389,24 +8580,26 @@ func (r *Renderer_VK) RenderQuadSetup() uint32 {
 			if tex2 == nil {
 				tex2 = r.dummyTexture
 			}
-			imageInfo2 := []vk.DescriptorImageInfo{
-				{
-					ImageLayout: tex2.SampledLayout(),
-					ImageView:   tex2.imageView,
-					Sampler:     r.spriteSamplers[0],
-				},
+			if tex2 != nil {
+				imageInfo2 := []vk.DescriptorImageInfo{
+					{
+						ImageLayout: tex2.SampledLayout(),
+						ImageView:   tex2.imageView,
+						Sampler:     r.spriteSamplers[0],
+					},
+				}
+				if tex2.filter {
+					imageInfo2[0].Sampler = r.spriteSamplers[1]
+				}
+				descriptorWrites = append(descriptorWrites, vk.WriteDescriptorSet{
+					SType:           vk.StructureTypeWriteDescriptorSet,
+					DstBinding:      6,
+					DstArrayElement: 0,
+					DescriptorCount: 1,
+					DescriptorType:  vk.DescriptorTypeCombinedImageSampler,
+					PImageInfo:      imageInfo2,
+				})
 			}
-			if tex2.filter {
-				imageInfo2[0].Sampler = r.spriteSamplers[1]
-			}
-			descriptorWrites = append(descriptorWrites, vk.WriteDescriptorSet{
-				SType:           vk.StructureTypeWriteDescriptorSet,
-				DstBinding:      6,
-				DstArrayElement: 0,
-				DescriptorCount: 1,
-				DescriptorType:  vk.DescriptorTypeCombinedImageSampler,
-				PImageInfo:      imageInfo2,
-			})
 		}
 	}
 

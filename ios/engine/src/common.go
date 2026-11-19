@@ -978,6 +978,21 @@ func LogMessage(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "%s\n", msg)
 }
 
+// lifecycleReady is false until the renderer has finished initializing. SDL
+// can deliver a foreground event during startup; handling it before gfx exists
+// (or before the VkSurface exists) can break engine startup.
+var lifecycleReady bool
+
+func markEngineReady() {
+	lifecycleReady = true
+	nativeEngineReady()
+}
+
+// LogLifecycle reports lifecycle/GPU-recovery breadcrumbs to the console only.
+func LogLifecycle(format string, a ...any) {
+	LogMessage("[LIFECYCLE] %s", fmt.Sprintf(format, a...))
+}
+
 type IniSection map[string]string
 
 func NewIniSection() IniSection {

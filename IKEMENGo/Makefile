@@ -10,17 +10,17 @@ APPLICATION_NAME = IKEMENGo
 
 IKEMENGo_FILES = main.m AppDelegate.m ViewController.m OverlayControls.m SDLWindowFix.m MetalStubs.m
 IKEMENGo_CFLAGS = -fobjc-arc -Wno-error \
-	-I/workspaces/ikemen-go-ios/deps/ios-sdl/include \
-	-I/workspaces/ikemen-go-ios/deps/ios-sdl/include/SDL2
+	-I$(THEOS_PROJECT_DIR)/../deps/ios-sdl/include \
+	-I$(THEOS_PROJECT_DIR)/../deps/ios-sdl/include/SDL2
 # libengine.a is cross-compiled for iOS on Linux by ios/engine/build-ios.sh;
 # MoltenVK is force-loaded so its exported vk* symbols survive for dlsym.
 IKEMENGo_LDFLAGS = \
 	-fuse-ld=lld \
 	engine/libengine.a \
-	-Wl,-force_load,/workspaces/ikemen-go-ios/deps/ios-moltenvk/libMoltenVK.a \
-	-L/workspaces/ikemen-go-ios/deps/ios-sdl/lib -lSDL2 \
-	-L/workspaces/ikemen-go-ios/deps/ios-libxmp/lib -lxmp \
-	-L/workspaces/ikemen-go-ios/deps/ios-ffmpeg/lib -lavfilter -lswscale -lavformat -lavcodec -lswresample -lavutil \
+	-Wl,-force_load,$(THEOS_PROJECT_DIR)/../deps/ios-moltenvk/libMoltenVK.a \
+	-L$(THEOS_PROJECT_DIR)/../deps/ios-sdl/lib -lSDL2 \
+	-L$(THEOS_PROJECT_DIR)/../deps/ios-libxmp/lib -lxmp \
+	-L$(THEOS_PROJECT_DIR)/../deps/ios-ffmpeg/lib -lavfilter -lswscale -lavformat -lavcodec -lswresample -lavutil \
 	-lz -lbz2 -liconv \
 	-framework AudioToolbox \
 	-framework AVFoundation \
@@ -34,6 +34,7 @@ IKEMENGo_LDFLAGS = \
 	-framework Foundation \
 	-framework IOSurface \
 	-framework Metal \
+	-framework OpenGLES \
 	-framework QuartzCore \
 	-framework UIKit \
 	-weak_framework GameController \

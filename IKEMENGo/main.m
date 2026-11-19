@@ -10,6 +10,10 @@
 #include <unistd.h>
 #include "AppDelegate.h"
 
+// Set just before SDL_main starts. Used by AppDelegate to avoid pushing
+// lifecycle events into SDL before the engine has initialized.
+BOOL IKEngineStarted = NO;
+
 // The SDKs these toolchains ship may omit ___isOSVersionAtLeast and
 // ___isPlatformVersionAtLeast from libSystem.tbd. SDL and MoltenVK link
 // against them, so provide runtime implementations.
@@ -67,6 +71,37 @@ static void IKCopyMissing(NSString *src, NSString *dst, NSFileManager *fm) {
 	}
 }
 
+// Engine-owned scripts must track the bundled build. IKCopyMissing preserves
+// user edits, so these few files are refreshed explicitly on every launch.
+static void IKRefreshEngineScript(NSString *relativePath, NSFileManager *fm) {
+	NSString *base = IKEMENDefaultBaseDir();
+	if (!base) {
+		return;
+	}
+	NSString *src = [[[NSBundle mainBundle] resourcePath]
+		stringByAppendingPathComponent:relativePath];
+	NSString *dst = [base stringByAppendingPathComponent:relativePath];
+	NSData *srcData = [NSData dataWithContentsOfFile:src];
+	if (!srcData) {
+		return;
+	}
+	if ([srcData isEqualToData:[NSData dataWithContentsOfFile:dst]]) {
+		return;
+	}
+	NSError *err = nil;
+	[fm createDirectoryAtPath:[dst stringByDeletingLastPathComponent]
+	  withIntermediateDirectories:YES attributes:nil error:&err];
+	if (err) {
+		NSLog(@"IKEMEN: refresh %@ dir failed: %@", relativePath, err);
+		return;
+	}
+	if (![srcData writeToFile:dst atomically:YES]) {
+		NSLog(@"IKEMEN: refresh %@ failed", relativePath);
+		return;
+	}
+	NSLog(@"IKEMEN: refreshed engine script %@", relativePath);
+}
+
 // On first launch (or after the bundled assets change) seed the base dir from
 // the runtime assets staged in the app ("data", "external", "font", "chars",
 // "stages", "sound", "video"). Seeding is a merge: existing files, including
@@ -83,6 +118,12 @@ static void seedEngineData(void) {
 	if (err) {
 		NSLog(@"IKEMEN: seed base dir create failed: %@", err);
 		return;
+	}
+
+	// Always refresh bundled engine scripts (e.g. the renderer menu) before the
+	// asset-stamp check, otherwise upgrades keep the old Documents copy.
+	for (NSString *script in @[ @"external/script/options.lua" ]) {
+		IKRefreshEngineScript(script, fm);
 	}
 
 	// The bundled stamp changes whenever the default assets change. If it
@@ -196,8 +237,8 @@ static void IKNativeCrashInit(void) {
 
 // MoltenVK 1.4.2's device init (MVKDevice::initQueues, built under the Xcode 16
 // SDK) creates an MTLResidencySetDescriptor when Metal argument buffers are in use
-// and the device supports residency sets (iOS 17+). The iPhoneOS16.5 SDK cannot
-// link that class, so it is provided by MetalStubs.m; passing the stub to Metal's
+// and the device supports residency sets (iOS 17+). The older iPhoneOS16.5 SDK
+// cannot link that class, so it is provided by MetalStubs.m; passing the stub to Metal's
 // newResidencySetWithDescriptor:error: raises an NSException that aborts the app.
 // MoltenVK gates the residency-set path on _isUsingMetalArgumentBuffers (and it
 // reads this config member from the MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS env var
@@ -206,10 +247,17 @@ static void IKNativeCrashInit(void) {
 // engine enables no argument-buffer-dependent Vulkan features (no descriptor
 // indexing, no sparse), so this is functionally transparent. Upstream ikemen
 // would crash here on iOS 17+; this is the documented deviation.
+//
+// iOS can report VK_ERROR_DEVICE_LOST when the Metal device is interrupted by
+// backgrounding even though the physical device is still present. The engine
+// has no path to rebuild the whole VkDevice, so let MoltenVK treat that
+// transient error as resumable instead of permanently losing the device.
 static void IKApplyMoltenVKConfigOverrides(void) {
 	setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "0", 1);
+	setenv("MVK_CONFIG_RESUME_LOST_DEVICE", "1", 1);
 	NSLog(@"IKEMENGo: set MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0 "
-	      @"(avoid MoltenVK MTLResidencySetDescriptor stub deref)");
+	      @"(avoid MoltenVK MTLResidencySetDescriptor stub deref) and "
+	      @"MVK_CONFIG_RESUME_LOST_DEVICE=1 (recover from background device loss)");
 }
 
 int main(int argc, char *argv[]) {

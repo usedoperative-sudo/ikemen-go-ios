@@ -198,9 +198,14 @@ func realMain() {
 		// For Android, let's see exactly what failed
 		panic(err)
 	}
-	// Force to Vulkan 1.3 for iOS
+	// iOS must keep a renderer name the options UI understands. Preserve a
+	// saved Vulkan/GLES choice; only canonicalize the stock desktop default.
 	if runtime.GOOS == "ios" {
-		cfg.Video.RenderMode = "Vulkan 1.3"
+		switch cfg.Video.RenderMode {
+		case "Vulkan 1.3", "OpenGL ES 3.0", "OpenGL ES 3.2":
+		default:
+			cfg.Video.RenderMode = "Vulkan 1.3"
+		}
 	}
 	sys.cfg = *cfg
 	// Logcat("LOG: Config Loaded. System Script: " + sys.cfg.Config.System)

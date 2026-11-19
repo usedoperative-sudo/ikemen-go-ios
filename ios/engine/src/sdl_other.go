@@ -14,6 +14,19 @@ func attachIOSMetalLayer(windowID uint32) {
 	// NOOP
 }
 
+func refreshIOSMetalLayer() {
+	// NOOP
+}
+
 func setOrientationHints() {
 	// NOOP
+}
+
+func nativeEngineReady() {
+	// NOOP
+}
+
+func nativeIsAppActive() bool {
+	// No iOS lifecycle to poll on other platforms.
+	return true
 }

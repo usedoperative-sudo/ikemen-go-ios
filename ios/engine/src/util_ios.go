@@ -3,10 +3,13 @@
 package main
 
 /*
+#cgo ios LDFLAGS: -framework OpenGLES
 #include <stdlib.h>
 #include <unistd.h>
 #include "SDL.h"
 #include "SDLWindowFix.h"
+#include "EngineLifecycle.h"
+#include "iosgl.h"
 
 // THIS IS THE KEY: A C constructor.
 // This runs when the .framework is loaded, BEFORE Go starts itself up.
@@ -135,12 +138,43 @@ func SDL_main(argc C.int, argv **C.char) C.int {
 	return 0
 }
 
+// iosGetProcAddress resolves ES 3.0 entry points from OpenGLES.framework.
+// SDL's GL_GetProcAddress is not guaranteed to expose every ES3 symbol on iOS.
+func iosGetProcAddress(name string) unsafe.Pointer {
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+	return C.iosGetProcAddress(cname)
+}
+
 func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
-	return &Renderer_VK{}, &FontRenderer_VK{}
+	switch cfgVal {
+	case "OpenGL ES 3.0", "OpenGL ES 3.2":
+		Logcat(fmt.Sprintf("selectRenderer: using OpenGL ES 3.0 renderer (config %q)", cfgVal))
+		return &Renderer_IOS{}, &FontRenderer_IOS{}
+	default:
+		// Vulkan remains the iOS default; unsupported/legacy config values
+		// (including the stock "OpenGL 3.3") fall back to it.
+		if cfgVal != "Vulkan 1.3" {
+			Logcat(fmt.Sprintf("selectRenderer: unsupported RenderMode %q, using Vulkan 1.3", cfgVal))
+		}
+		return &Renderer_VK{}, &FontRenderer_VK{}
+	}
 }
 
 func Logcat(s string) {
 	fmt.Fprintln(os.Stderr, "[ikemen]", s)
+}
+
+// nativeEngineReady tells the Objective-C app that Vulkan rendering is ready
+// to accept background/foreground lifecycle events.
+func nativeEngineReady() {
+	C.IKSetEngineStarted(1)
+}
+
+// nativeIsAppActive polls UIKit directly. Lifecycle events are not reliable
+// enough to drive GPU recovery, so the renderer checks this every frame.
+func nativeIsAppActive() bool {
+	return C.IKIsAppActive() != 0
 }
 
 //export GetMoltenVKWindowID
