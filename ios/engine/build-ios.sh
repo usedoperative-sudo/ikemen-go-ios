@@ -69,9 +69,9 @@ export PKG_CONFIG_PATH="${DEPS}/ios-sdl/lib/pkgconfig:${DEPS}/ios-ffmpeg/lib/pkg
 # and a stray commit hash all glued together. Override on the command line when
 # bumping either number:
 #   IKEMEN_ENGINE_VERSION=<upstream Ikemen-GO release>   (default 1.0.0)
-#   IKEMEN_PORT_VERSION=<this iOS port's release>        (default 1.1)
+#   IKEMEN_PORT_VERSION=<this iOS port's release>        (default 1.2)
 IKEMEN_ENGINE_VERSION="${IKEMEN_ENGINE_VERSION:-1.0.0}"
-IKEMEN_PORT_VERSION="${IKEMEN_PORT_VERSION:-1.1}"
+IKEMEN_PORT_VERSION="${IKEMEN_PORT_VERSION:-1.2}"
 VERSION="${IKEMEN_PORT_VERSION}_${IKEMEN_ENGINE_VERSION}"
 BUILDTIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
